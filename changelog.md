@@ -1,5 +1,13 @@
 # changelog
 
+## v0.23.1 (2026-05-15)
+
+### fixes
+
+- retry transient Telegram network errors instead of dropping requests or downloads [#239](https://github.com/banteg/takopi/pull/239)
+- guard OpenCode against pure numeric prompts that crash the CLI parser [#237](https://github.com/banteg/takopi/pull/237)
+- route Telegram callback data to matching command backends [#238](https://github.com/banteg/takopi/pull/238)
+
 ## v0.23.0 (2026-05-15)
 
 ### changes
