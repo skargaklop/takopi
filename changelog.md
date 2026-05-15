@@ -1,5 +1,11 @@
 # changelog
 
+## v0.23.3 (2026-05-16)
+
+### fixes
+
+- keep loose ordered and unordered list item text on the marker line in Telegram messages [#243](https://github.com/banteg/takopi/pull/243)
+
 ## v0.23.2 (2026-05-15)
 
 ### changes
