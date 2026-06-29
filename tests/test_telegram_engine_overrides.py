@@ -39,6 +39,7 @@ def test_reasoning_levels_are_engine_specific() -> None:
 def test_supports_reasoning_known_engines() -> None:
     assert supports_reasoning("claude") is True
     assert supports_reasoning("codex") is True
+    assert supports_reasoning("omp") is True
     assert supports_reasoning("pi") is True
     assert supports_reasoning("opencode") is False
 

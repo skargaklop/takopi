@@ -36,7 +36,13 @@ logger = get_logger(__name__)
 
 ENGINE: EngineId = "pi"
 
-_RESUME_RE = re.compile(r"(?im)^\s*`?pi\s+--session\s+(?P<token>.+?)`?\s*$")
+_TOKEN_PATTERN = r'(?P<token>"[^"]+"|\'[^\']+\'|[^\s`]+)'
+_RESUME_RE = re.compile(
+    rf"(?im)^\s*`?pi\s+(?:--session|resume)\s+{_TOKEN_PATTERN}`?(?:\s|$)"
+)
+_RESUME_LINE_RE = re.compile(
+    rf"(?im)^\s*`?pi\s+(?:--session|resume)\s+{_TOKEN_PATTERN}`?\s*$"
+)
 
 _SESSION_ID_PREFIX_LEN = 8
 
@@ -313,8 +319,30 @@ class PiRunner(ResumeTokenMixin, JsonlSubprocessRunner):
             return None
         return ResumeToken(engine=self.engine, value=found)
 
+    def is_resume_line(self, line: str) -> bool:
+        return bool(_RESUME_LINE_RE.match(line))
+
     def command(self) -> str:
-        return "pi"
+        import sys
+        return "pi.cmd" if sys.platform == "win32" else "pi"
+
+    def _resolve_session_path(self, session_id: str) -> str:
+        """Resolve a session UUID to its full file path, so Pi doesn't prompt
+        about cross-project fork when the session belongs to a different directory."""
+        if _looks_like_session_path(session_id):
+            return session_id
+        from pathlib import Path as _Path
+        agent_dir = _Path(os.environ.get("PI_CODING_AGENT_DIR", "~/.pi/agent")).expanduser()
+        sessions_root = agent_dir / "sessions"
+        if not sessions_root.is_dir():
+            return session_id
+        for project_dir in sorted(sessions_root.iterdir()):
+            if not project_dir.is_dir():
+                continue
+            for f in project_dir.iterdir():
+                if f.name.endswith(".jsonl") and session_id in f.name:
+                    return str(f.resolve())
+        return session_id
 
     def build_args(
         self,
@@ -334,7 +362,8 @@ class PiRunner(ResumeTokenMixin, JsonlSubprocessRunner):
             args.extend(["--model", model])
         if run_options is not None and run_options.reasoning:
             args.extend(["--thinking", str(run_options.reasoning)])
-        args.extend(["--session", state.resume.value])
+        session_value = self._resolve_session_path(state.resume.value)
+        args.extend(["--session", session_value])
         args.append(self._sanitize_prompt(prompt))
         return args
 

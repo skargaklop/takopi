@@ -1,4 +1,6 @@
 from typing import cast
+from pathlib import Path
+import tomllib
 
 import pytest
 
@@ -66,3 +68,13 @@ def test_engine_commands_do_not_expose_engine_id_option(
         assert "--final-notify" in options
         assert "--debug" in options
         assert not any(opt.lstrip("-") == "engine-id" for opt in options)
+
+
+def test_pyproject_registers_omp_backend() -> None:
+    pyproject = Path(__file__).resolve().parents[1] / "pyproject.toml"
+    data = tomllib.loads(pyproject.read_text(encoding="utf-8"))
+
+    entry_points = data["project"]["entry-points"]["takopi.engine_backends"]
+
+    assert entry_points["omp"] == "takopi.runners.omp:BACKEND"
+    assert "oh-my-pi" not in entry_points

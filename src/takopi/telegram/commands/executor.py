@@ -385,6 +385,35 @@ class _TelegramCommandExecutor(CommandExecutor):
             if self._on_thread_known is None
             else self._on_thread_known
         )
+
+        # Extract resume token from prompt text
+        prompt = request.prompt
+        resume_token: ResumeToken | None = None
+        try:
+            entry = self._runtime.resolve_runner(
+                resume_token=None, engine_override=engine
+            )
+            runner = entry.runner
+            resume_token = runner.extract_resume(prompt)
+            if resume_token is not None:
+                lines = [
+                    l for l in prompt.splitlines() if not runner.is_resume_line(l)
+                ]
+                prompt = "\n".join(lines)
+        except Exception:
+            pass
+
+        # Fallback for command-stripped /ENGINE resume <token> / --resume / --session / -s / -r
+        if resume_token is None:
+            import re as _re
+            m = _re.match(
+                r"^\s*(?:resume|--resume|--session|-r|-s)\s+(\S+)\s*(.*)$",
+                prompt, _re.DOTALL,
+            )
+            if m:
+                resume_token = ResumeToken(engine=engine, value=m.group(1))
+                prompt = m.group(2) or ""
+
         if mode == "capture":
             capture = _CaptureTransport()
             exec_cfg = ExecBridgeConfig(
@@ -398,8 +427,8 @@ class _TelegramCommandExecutor(CommandExecutor):
                 running_tasks={},
                 chat_id=self._chat_id,
                 user_msg_id=self._user_msg_id,
-                text=request.prompt,
-                resume_token=None,
+                text=prompt,
+                resume_token=resume_token,
                 context=request.context,
                 reply_ref=self._reply_ref,
                 on_thread_known=on_thread_known,
@@ -415,8 +444,8 @@ class _TelegramCommandExecutor(CommandExecutor):
             running_tasks=self._running_tasks,
             chat_id=self._chat_id,
             user_msg_id=self._user_msg_id,
-            text=request.prompt,
-            resume_token=None,
+            text=prompt,
+            resume_token=resume_token,
             context=request.context,
             reply_ref=self._reply_ref,
             on_thread_known=on_thread_known,

@@ -187,6 +187,12 @@ class TransportRuntime:
         )
         reply_ctx = parse_context_line(reply_text, projects=self._projects)
         resume_token = self._router.resolve_resume(directives.prompt, reply_text)
+        # If directives stripped the engine prefix (e.g. "/codex resume abc") the
+        # stripped prompt ("resume abc") won't match any engine regex. Reconstruct
+        # the original line to try again with the known engine.
+        if resume_token is None and directives.engine is not None:
+            reconstructed = f"{directives.engine} {directives.prompt}"
+            resume_token = self._router.resolve_resume(reconstructed, None)
         chat_project = self._projects.project_for_chat(chat_id)
         default_project = chat_project or self._projects.default_project
 

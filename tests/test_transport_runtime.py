@@ -2,8 +2,10 @@ from pathlib import Path
 
 from takopi.config import ProjectConfig, ProjectsConfig
 from takopi.context import RunContext
+from takopi.model import ResumeToken
 from takopi.router import AutoRouter, RunnerEntry
 from takopi.runners.mock import Return, ScriptRunner
+from takopi.runners.omp import OmpRunner
 from takopi.transport_runtime import TransportRuntime
 
 
@@ -161,3 +163,30 @@ def test_resolve_message_project_directive_clears_ambient_branch() -> None:
 
     assert resolved.context == RunContext(project="other", branch=None)
     assert resolved.context_source == "directives"
+
+
+def test_resolve_message_reconstructs_omp_resume_from_directive() -> None:
+    codex = ScriptRunner([Return(answer="ok")], engine="codex")
+    omp = OmpRunner(
+        extra_args=[],
+        model=None,
+        provider=None,
+    )
+    router = AutoRouter(
+        entries=[
+            RunnerEntry(engine=codex.engine, runner=codex),
+            RunnerEntry(engine=omp.engine, runner=omp),
+        ],
+        default_engine=codex.engine,
+    )
+    projects = ProjectsConfig(projects={}, default_project=None)
+    runtime = TransportRuntime(router=router, projects=projects)
+
+    resolved = runtime.resolve_message(
+        text="/omp resume abc123 continue",
+        reply_text=None,
+    )
+
+    assert resolved.engine_override == "omp"
+    assert resolved.prompt == "resume abc123 continue"
+    assert resolved.resume_token == ResumeToken(engine="omp", value="abc123")

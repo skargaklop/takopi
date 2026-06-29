@@ -1,3 +1,4 @@
+import os
 from pathlib import Path, PureWindowsPath
 from unittest.mock import patch
 
@@ -11,6 +12,11 @@ from takopi.runners.pi import (
     PiStreamState,
     _default_session_dir,
     translate_pi_event,
+)
+from takopi.runners.omp import (
+    BACKEND as OMP_BACKEND,
+    ENGINE as OMP_ENGINE,
+    OmpRunner,
 )
 from takopi.schemas import pi as pi_schema
 
@@ -49,6 +55,28 @@ def test_pi_resume_format_and_extract(tmp_path: Path) -> None:
     assert runner.extract_resume(f'`pi --session "{spaced_path}"`') == spaced
 
 
+def test_omp_resume_format_and_extract(tmp_path: Path) -> None:
+    runner = OmpRunner(
+        extra_args=[],
+        model=None,
+        provider=None,
+    )
+    token = ResumeToken(engine=OMP_ENGINE, value="abc123")
+
+    assert runner.format_resume(token) == "`omp --resume abc123`"
+    assert runner.extract_resume("`omp --resume abc123`") == token
+    assert runner.extract_resume("/omp resume abc123") == token
+    assert runner.is_resume_line("`omp --resume abc123`") is True
+    assert runner.is_resume_line("`/omp resume abc123`") is True
+    assert runner.extract_resume("`pi --session abc123`") is None
+
+    spaced_path = tmp_path / "oh my pi session.jsonl"
+    spaced = ResumeToken(engine=OMP_ENGINE, value=str(spaced_path))
+    assert runner.format_resume(spaced) == f'`omp --resume "{spaced_path}"`'
+    assert runner.extract_resume(f'`/omp resume "{spaced_path}"`') == spaced
+    assert runner.is_resume_line("/omp resume abc123 continue") is False
+
+
 def test_translate_success_fixture() -> None:
     state = PiStreamState(resume=ResumeToken(engine=ENGINE, value="session.jsonl"))
     events: list = []
@@ -85,6 +113,45 @@ def test_translate_success_fixture() -> None:
     assert completed.ok is True
     assert completed.resume == started.resume
     assert completed.answer == "Done. Added notes.md."
+
+
+def test_omp_translate_success_fixture() -> None:
+    runner = OmpRunner(
+        extra_args=[],
+        model="takopi-model",
+        provider="takopi-provider",
+    )
+    state = runner.new_state(
+        "prompt",
+        ResumeToken(engine=OMP_ENGINE, value="session.jsonl"),
+    )
+    events: list = []
+    for event in _load_fixture("pi_stream_success.jsonl"):
+        events.extend(
+            runner.translate(
+                event,
+                state=state,
+                resume=None,
+                found_session=None,
+            )
+        )
+
+    started = next(evt for evt in events if isinstance(evt, StartedEvent))
+    completed = next(evt for evt in events if isinstance(evt, CompletedEvent))
+    action = next(evt for evt in events if isinstance(evt, ActionEvent))
+
+    assert started.engine == OMP_ENGINE
+    assert started.resume.engine == OMP_ENGINE
+    assert started.title == "omp"
+    assert started.meta == {
+        "cwd": os.getcwd(),
+        "model": "takopi-model",
+        "provider": "takopi-provider",
+    }
+    assert action.engine == OMP_ENGINE
+    assert completed.engine == OMP_ENGINE
+    assert completed.resume is not None
+    assert completed.resume.engine == OMP_ENGINE
 
 
 def test_translate_error_fixture() -> None:
@@ -129,6 +196,50 @@ def test_extract_resume_keeps_session_path(tmp_path: Path) -> None:
     token = runner.extract_resume(f"pi --session {session_path}")
     assert token is not None
     assert token.value == str(session_path)
+
+
+def test_omp_build_args_invokes_omp_directly(monkeypatch: pytest.MonkeyPatch) -> None:
+    runner = OmpRunner(
+        extra_args=["--extra"],
+        model="cfg-model",
+        provider="cfg-provider",
+    )
+    state = runner.new_state("prompt", None)
+    monkeypatch.setattr("takopi.runners.omp.get_run_options", lambda: None)
+
+    assert runner.command() == "omp"
+    assert runner.build_args("hello", None, state=state) == [
+        "--extra",
+        "--print",
+        "--mode",
+        "json",
+        "--provider",
+        "cfg-provider",
+        "--model",
+        "cfg-model",
+        "hello",
+    ]
+
+    resume = ResumeToken(engine=OMP_ENGINE, value="session-123")
+    resumed_state = runner.new_state("hello", resume)
+    assert runner.build_args("hello", resume, state=resumed_state) == [
+        "--extra",
+        "--print",
+        "--mode",
+        "json",
+        "--provider",
+        "cfg-provider",
+        "--model",
+        "cfg-model",
+        "--resume",
+        "session-123",
+        "hello",
+    ]
+
+def test_omp_backend_metadata_documents_terminal_command() -> None:
+    assert OMP_BACKEND.id == OMP_ENGINE
+    assert OMP_BACKEND.cli_cmd == "omp"
+    assert OMP_BACKEND.install_cmd == "bun install -g @oh-my-pi/pi-coding-agent"
 
 
 @pytest.mark.anyio

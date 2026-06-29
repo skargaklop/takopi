@@ -11,6 +11,7 @@ Prefix the first non-empty line with an engine directive:
 /claude shrink and store artifacts forever
 /opencode hide their paper until they reply
 /pi render a diorama of this timeline
+/omp continue the Oh My Pi session
 ```
 
 Directives are only parsed at the start of the first non-empty line.
@@ -29,12 +30,19 @@ Use `/agent`:
 - In normal chats, it affects the whole chat.
 - In group chats, only admins can change defaults.
 
-Selection precedence (highest to lowest): resume token → `/<engine-id>` directive → topic default → chat default → project default → global default.
+Selection precedence (highest to lowest): resume token -> `/<engine-id>` directive -> topic default -> chat default -> project default -> global default.
 
 ## Engine installation
 
-Takopi shells out to engine CLIs. Install them and make sure they’re on your `PATH`
-(`codex`, `claude`, `opencode`, `pi`). Authentication is handled by each CLI.
+Takopi shells out to engine CLIs. Install them and make sure they're on your `PATH`
+(`codex`, `claude`, `opencode`, `pi`, `omp`). Authentication is handled by each CLI.
+
+Oh My Pi is exposed as the `omp` engine and Takopi launches the terminal command
+directly:
+
+- runtime shells out to `omp`
+- install/update with `bun install -g @oh-my-pi/pi-coding-agent`
+- resume from Telegram with `` `omp --resume <token>` `` or `/omp resume <token>`
 
 ## Related
 

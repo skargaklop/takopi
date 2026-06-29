@@ -37,7 +37,8 @@ __all__ = [
     "translate_codex_event",
 ]
 
-_RESUME_RE = re.compile(r"(?im)^\s*`?codex\s+resume\s+(?P<token>[^`\s]+)`?\s*$")
+_RESUME_RE = re.compile(r"(?im)^\s*`?codex\s+resume\s+(?P<token>[^`\s]+)`?(?:\s|$)")
+_RESUME_LINE_RE = re.compile(r"(?im)^\s*`?codex\s+resume\s+(?P<token>[^`\s]+)`?\s*$")
 _RECONNECTING_RE = re.compile(
     r"^Reconnecting\.{3}\s*(?P<attempt>\d+)/(?P<max>\d+)\s*$",
     re.IGNORECASE,
@@ -459,6 +460,9 @@ class CodexRunner(ResumeTokenMixin, JsonlSubprocessRunner):
     resume_re = _RESUME_RE
     logger = logger
 
+    def is_resume_line(self, line: str) -> bool:
+        return bool(_RESUME_LINE_RE.match(line))
+
     def __init__(
         self,
         *,
@@ -471,6 +475,9 @@ class CodexRunner(ResumeTokenMixin, JsonlSubprocessRunner):
         self.session_title = title
 
     def command(self) -> str:
+        import sys
+        if sys.platform == "win32" and not self.codex_cmd.endswith(".exe") and not self.codex_cmd.endswith(".cmd"):
+            return self.codex_cmd + ".cmd"
         return self.codex_cmd
 
     def build_args(
@@ -1285,6 +1292,9 @@ class AppServerCodexRunner(ResumeTokenMixin, BaseRunner):
     resume_re = _RESUME_RE
     logger = logger
 
+    def is_resume_line(self, line: str) -> bool:
+        return bool(_RESUME_LINE_RE.match(line))
+
     def __init__(
         self,
         *,
@@ -1360,7 +1370,8 @@ class AppServerCodexRunner(ResumeTokenMixin, BaseRunner):
 
 
 def build_runner(config: EngineConfig, config_path: Path) -> Runner:
-    codex_cmd = "codex"
+    import sys
+    codex_cmd = "codex.cmd" if sys.platform == "win32" else "codex"
 
     mode_value = config.get("mode", "app_server")
     if mode_value not in {"app_server", "exec"}:

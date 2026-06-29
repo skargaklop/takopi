@@ -44,6 +44,9 @@ logger = get_logger(__name__)
 ENGINE: EngineId = "opencode"
 
 _RESUME_RE = re.compile(
+    r"(?im)^\s*`?opencode(?:\s+run)?\s+(?:--session|-s)\s+(?P<token>ses_[A-Za-z0-9]+)`?(?:\s|$)"
+)
+_RESUME_LINE_RE = re.compile(
     r"(?im)^\s*`?opencode(?:\s+run)?\s+(?:--session|-s)\s+(?P<token>ses_[A-Za-z0-9]+)`?\s*$"
 )
 _NUMERIC_PROMPT_RE = re.compile(r"^[0-9]+$")
@@ -307,6 +310,9 @@ class OpenCodeRunner(ResumeTokenMixin, JsonlSubprocessRunner):
     engine: EngineId = ENGINE
     resume_re: re.Pattern[str] = _RESUME_RE
 
+    def is_resume_line(self, line: str) -> bool:
+        return bool(_RESUME_LINE_RE.match(line))
+
     opencode_cmd: str = "opencode"
     model: str | None = None
     session_title: str = "opencode"
@@ -318,6 +324,9 @@ class OpenCodeRunner(ResumeTokenMixin, JsonlSubprocessRunner):
         return f"`opencode --session {token.value}`"
 
     def command(self) -> str:
+        import sys
+        if sys.platform == "win32" and not self.opencode_cmd.endswith(".exe") and not self.opencode_cmd.endswith(".cmd"):
+            return self.opencode_cmd + ".cmd"
         return self.opencode_cmd
 
     def build_args(
