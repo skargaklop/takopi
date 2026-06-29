@@ -4,6 +4,8 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Literal, cast
 
+import anyio
+
 from ..logging import get_logger
 from ..markdown import MarkdownFormatter, MarkdownParts
 from ..progress import ProgressState
@@ -51,6 +53,7 @@ STEER_CANCEL_MARKUP = {
     ]
 }
 CLEAR_MARKUP = {"inline_keyboard": []}
+MIN_FOLLOWUP_DELAY_S = 0.1
 
 
 class TelegramPresenter:
@@ -58,7 +61,7 @@ class TelegramPresenter:
         self,
         *,
         formatter: MarkdownFormatter | None = None,
-        message_overflow: str = "trim",
+        message_overflow: str = "split",
     ) -> None:
         self._formatter = formatter or MarkdownFormatter()
         self._message_overflow = message_overflow
@@ -174,6 +177,7 @@ class TelegramTransport:
         notify: bool,
     ) -> None:
         for followup in followups:
+            await anyio.sleep(MIN_FOLLOWUP_DELAY_S)
             await self._bot.send_message(
                 chat_id=chat_id,
                 text=followup.text,

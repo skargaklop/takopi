@@ -68,6 +68,12 @@ def test_normalized_value_from_settings() -> None:
     )
 
 
+def test_telegram_message_overflow_defaults_to_split() -> None:
+    settings = _settings()
+
+    assert _telegram_settings(settings).message_overflow == "split"
+
+
 def test_should_run_interactive(monkeypatch) -> None:
     class _Tty:
         def isatty(self) -> bool:

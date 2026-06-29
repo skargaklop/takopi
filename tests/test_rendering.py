@@ -115,3 +115,11 @@ def test_split_markdown_body_closes_and_reopens_fence() -> None:
     assert len(chunks) > 1
     assert chunks[0].rstrip().endswith("```")
     assert chunks[1].startswith("```py\n")
+
+
+def test_split_markdown_body_prefers_sentence_boundaries() -> None:
+    body = "Alpha ends. Beta ends. Gamma ends."
+
+    chunks = split_markdown_body(body, max_chars=24)
+
+    assert chunks == ["Alpha ends. Beta ends. ", "Gamma ends."]

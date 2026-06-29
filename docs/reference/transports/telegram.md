@@ -158,9 +158,8 @@ line stays visible so reply-to-continue still works.
 
 ## Message overflow
 
-By default, takopi trims long final responses to ~3500 characters to stay under
-Telegram's 4096 character limit after entity parsing. You can opt into splitting
-instead:
+By default, takopi splits long final responses into multiple messages to stay
+under Telegram's 4096 character limit after entity parsing.
 
 === "takopi config"
 
@@ -172,11 +171,16 @@ instead:
 
     ```toml
     [transports.telegram]
-    message_overflow = "split" # trim | split
+    message_overflow = "split" # split | trim
     ```
 
-Split mode sends multiple messages. Each chunk includes the footer; follow-up
-chunks add a "continued (N/M)" header.
+Split mode prefers paragraph boundaries, then sentence boundaries, before
+falling back to hard line splits. Each chunk includes the footer; follow-up
+chunks add a "continued (N/M)" header. Takopi waits at least 100 ms between
+message parts.
+
+Set `message_overflow = "trim"` to keep the older single-message truncation
+behavior.
 
 ## Forum topics (optional)
 

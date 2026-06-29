@@ -15,6 +15,7 @@ MAX_BODY_CHARS = 3500
 _MD_RENDERER = MarkdownIt("commonmark", {"html": False})
 _BULLET_RE = re.compile(r"(?m)^(\s*)•")
 _FENCE_RE = re.compile(r"^(?P<indent>[ \t]*)(?P<fence>[`~]{3,})(?P<info>.*)$")
+_SENTENCE_BOUNDARY_RE = re.compile(r"(?<=[.!?])\s+")
 _ORDERED_ITEM_RE = re.compile(r"^(?P<indent>[ \t]{0,3})(?P<marker>\d+[.)])\s+")
 _UNORDERED_ITEM_RE = re.compile(r"^(?P<indent>[ \t]{0,3})[-+*]\s+")
 
@@ -127,9 +128,51 @@ def _split_long_line(line: str, max_chars: int) -> list[str]:
     return parts
 
 
+def _sentence_units(text: str) -> list[str]:
+    units: list[str] = []
+    start = 0
+    for match in _SENTENCE_BOUNDARY_RE.finditer(text):
+        units.append(text[start : match.end()])
+        start = match.end()
+    if start < len(text):
+        units.append(text[start:])
+    return [unit for unit in units if unit]
+
+
+def _split_prose_block(block: str, max_chars: int) -> list[str] | None:
+    units = _sentence_units(block)
+    if len(units) <= 1:
+        return None
+
+    pieces: list[str] = []
+    current = ""
+    for unit in units:
+        if len(unit) > max_chars:
+            if current:
+                pieces.append(current)
+                current = ""
+            pieces.extend(_split_long_line(unit, max_chars))
+            continue
+        if current and len(current) + len(unit) > max_chars:
+            pieces.append(current)
+            current = ""
+        current += unit
+    if current:
+        pieces.append(current)
+    return pieces
+
+
+def _has_fence_marker(block: str) -> bool:
+    return any(_FENCE_RE.match(line) for line in block.splitlines())
+
+
 def _split_block(block: str, max_chars: int) -> list[str]:
     if len(block) <= max_chars:
         return [block]
+    if not _has_fence_marker(block):
+        prose_pieces = _split_prose_block(block, max_chars)
+        if prose_pieces is not None:
+            return prose_pieces
     pieces: list[str] = []
     current = ""
     for line in block.splitlines(keepends=True):

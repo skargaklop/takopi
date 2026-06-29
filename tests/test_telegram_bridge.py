@@ -356,7 +356,7 @@ def test_telegram_presenter_final_clears_button() -> None:
 
 
 def test_telegram_presenter_split_overflow_adds_followups() -> None:
-    presenter = TelegramPresenter(message_overflow="split")
+    presenter = TelegramPresenter()
     state = ProgressTracker(engine="codex").snapshot()
 
     rendered = presenter.render_final(
@@ -373,6 +373,21 @@ def test_telegram_presenter_split_overflow_adds_followups() -> None:
     assert all(
         item.extra["reply_markup"]["inline_keyboard"] == [] for item in followups
     )
+
+
+def test_telegram_presenter_trim_overflow_keeps_legacy_mode() -> None:
+    presenter = TelegramPresenter(message_overflow="trim")
+    state = ProgressTracker(engine="codex").snapshot()
+
+    rendered = presenter.render_final(
+        state,
+        elapsed_s=0.0,
+        status="done",
+        answer="x" * (MAX_BODY_CHARS + 10),
+    )
+
+    assert rendered.extra.get("followups") is None
+    assert rendered.text.endswith("\n\n")
 
 
 @pytest.mark.anyio
@@ -422,11 +437,17 @@ async def test_telegram_transport_passes_reply_markup() -> None:
 
 
 @pytest.mark.anyio
-async def test_telegram_transport_sends_followups() -> None:
+async def test_telegram_transport_sends_followups(monkeypatch) -> None:
     bot = FakeBot()
     transport = TelegramTransport(bot)
     reply = MessageRef(channel_id=123, message_id=10)
     followup = RenderedMessage(text="part 2")
+    sleeps: list[float] = []
+
+    async def fake_sleep(delay: float) -> None:
+        sleeps.append(delay)
+
+    monkeypatch.setattr(anyio, "sleep", fake_sleep)
 
     await transport.send(
         channel_id=123,
@@ -440,6 +461,7 @@ async def test_telegram_transport_sends_followups() -> None:
     assert bot.send_calls[1]["message_thread_id"] == 7
     assert bot.send_calls[1]["replace_message_id"] is None
     assert bot.send_calls[1]["disable_notification"] is True
+    assert sleeps == [0.1]
 
 
 @pytest.mark.anyio
