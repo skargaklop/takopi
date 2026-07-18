@@ -45,6 +45,7 @@ claude = "takopi.runners.claude:BACKEND"
 opencode = "takopi.runners.opencode:BACKEND"
 pi = "takopi.runners.pi:BACKEND"
 omp = "takopi.runners.omp:BACKEND"
+grok = "takopi.runners.grok:BACKEND"
 
 [project.entry-points."takopi.transport_backends"]
 telegram = "takopi.telegram.backend:BACKEND"

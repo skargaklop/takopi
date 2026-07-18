@@ -1,0 +1,4 @@
+{"type":"thought","data":"Scanning the workspace for a short answer."}
+{"type":"text","data":"Hello"}
+{"type":"text","data":" from Grok."}
+{"type":"end","stopReason":"EndTurn","sessionId":"aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa","requestId":"req-success-1","num_turns":1,"usage":{"input_tokens":10,"cache_read_input_tokens":0,"output_tokens":5,"reasoning_tokens":2,"total_tokens":15},"modelUsage":{"grok-build":{"inputTokens":10,"outputTokens":5,"cacheReadInputTokens":0,"modelCalls":1,"costUSD":0.001}}}

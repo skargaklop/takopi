@@ -245,3 +245,37 @@ steer a running turn.
     [opencode]
     model = "claude-sonnet"
     ```
+
+### `grok`
+
+| Key | Type | Default | Notes |
+|-----|------|---------|-------|
+| `model` | string | (unset) | Passed as `-m` / `--model` (e.g. `grok-build`). |
+| `yolo` | bool | `true` | Passes `--yolo` for unattended tool approval. |
+| `tools` | string[] \| string | (unset) | Passed as `--tools` (Grok internal tool IDs). |
+| `disallowed_tools` | string[] \| string | (unset) | Passed as `--disallowed-tools`. |
+| `reasoning_effort` | string | (unset) | Passed as `--effort`. |
+| `max_turns` | int | (unset) | Passed as `--max-turns`. |
+| `extra_args` | string[] | `[]` | Extra CLI args for `grok`. |
+
+=== "takopi config"
+
+    ```sh
+    takopi config set grok.model "grok-build"
+    takopi config set grok.yolo true
+    takopi config set grok.extra_args '["--no-auto-update"]'
+    ```
+
+=== "toml"
+
+    ```toml
+    [grok]
+    model = "grok-build"
+    yolo = true
+    extra_args = ["--no-auto-update"]
+    ```
+
+Notes:
+
+* Grok tool IDs are internal names such as `read_file`, `grep`, `list_dir`, `run_terminal_cmd` — not Claude’s `Bash`/`Read`/`Edit`/`Write`.
+* Headless mode uses `--output-format streaming-json` with resume via `--resume` / new sessions via `--session-id` (UUID).

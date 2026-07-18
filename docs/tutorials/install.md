@@ -68,6 +68,18 @@ npm install -g @mariozechner/pi-coding-agent
 
 Pi can authenticate via a provider login or use API billing. You can log in with Anthropic (Claude subscription), OpenAI (ChatGPT subscription), GitHub Copilot, Google Cloud Code Assist (Gemini CLI), or Antigravity (Gemini 3, Claude, GPT-OSS), or choose API billing instead.
 
+### Grok Build CLI
+
+Install the Grok Build CLI and ensure `grok` is on your `PATH` (typical location: `~/.grok/bin/grok`).
+
+Authenticate with one of:
+
+- `grok login` (browser OAuth)
+- `grok login --device-auth` (device code, no local browser)
+- `XAI_API_KEY` for API-key / CI style auth
+
+Takopi runs Grok in headless mode (`grok -p`) with `--output-format streaming-json` and defaults to `--yolo` so tool prompts do not block Telegram automation.
+
 ## 4. Run onboarding
 
 Start Takopi without a config file. It will detect this and launch the setup wizard:

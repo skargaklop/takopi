@@ -1,0 +1,2 @@
+{"type":"text","data":"Partial answer before failure."}
+{"type":"error","message":"Couldn't start session: auth failed","sessionId":"bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"}
