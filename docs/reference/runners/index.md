@@ -8,4 +8,5 @@ Runner docs describe the **engine-specific** behavior: event shapes, JSON stream
 - Pi: [Runner](pi/runner.md), [Stream JSON cheatsheet](pi/stream-json-cheatsheet.md), [Takopi events](pi/takopi-events.md)
 - Oh My Pi: [Runner](omp/runner.md)
 - Grok: [Runner](grok/runner.md)
+- Antigravity (`agy`): [Runner](agy/runner.md)
 

@@ -15,6 +15,7 @@ Different engines have different strengths:
 | **OpenCode** | Open-source alternative, local models |
 | **Pi** | Conversational, explanations |
 | **Grok** | Grok Build CLI headless runs, multi-tool agent sessions |
+| **Agy** | Google Antigravity CLI (`agy`) headless print mode |
 
 You might want Codex for quick tasks and Claude for deep work—without manually specifying every time.
 
@@ -33,6 +34,9 @@ Prefix any message with `/<engine>`:
 
 !!! user "You"
     /grok summarize this repo and list the top risks
+
+!!! user "You"
+    /agy list open TODOs in this project
 
 The engine only applies to that message. The response will have a resume line for that engine:
 

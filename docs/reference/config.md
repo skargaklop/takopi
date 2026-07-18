@@ -258,6 +258,37 @@ steer a running turn.
 | `max_turns` | int | (unset) | Passed as `--max-turns`. |
 | `extra_args` | string[] | `[]` | Extra CLI args for `grok`. |
 
+### `agy` (Antigravity CLI)
+
+| Key | Type | Default | Notes |
+|-----|------|---------|-------|
+| `model` | string | (unset) | Passed as `--model`. |
+| `yolo` | bool | `true` | Passes `--dangerously-skip-permissions` (alias key: `dangerously_skip_permissions`). |
+| `sandbox` | bool | `false` | Passes `--sandbox`. |
+| `mode` | string | (unset) | Passed as `--mode` (e.g. `accept-edits`, `plan`). |
+| `cmd` | string | (unset) | Binary override (else `AGY_CLI_BIN` / `ANTIGRAVITY_CLI_BIN` / `agy` on PATH). |
+| `extra_args` | string[] | `[]` | Extra CLI args for `agy`. |
+
+=== "takopi config"
+
+    ```sh
+    takopi config set agy.model "..."
+    takopi config set agy.yolo true
+    ```
+
+=== "toml"
+
+    ```toml
+    [agy]
+    yolo = true
+    # model = "..."
+    ```
+
+Notes:
+
+* Headless mode is plain text (`agy -p`), not stream-json. Progress UX is start/complete only.
+* Resume line: `` `agy --conversation <uuid>` ``.
+
 === "takopi config"
 
     ```sh

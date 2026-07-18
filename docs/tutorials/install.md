@@ -80,6 +80,18 @@ Authenticate with one of:
 
 Takopi runs Grok in headless mode (`grok -p`) with `--output-format streaming-json` and defaults to `--yolo` so tool prompts do not block Telegram automation.
 
+### Antigravity CLI (`agy`)
+
+Install the official CLI (separate from the Antigravity GUI app):
+
+```powershell
+irm https://antigravity.google/cli/install.ps1 | iex
+```
+
+Ensure `agy` is on your `PATH`, then sign in with Google when prompted (`agy`).
+
+Takopi runs Antigravity headless as `agy -p <prompt>` (plain-text stdout) and defaults to `--dangerously-skip-permissions` for Telegram automation. Resume uses `` `agy --conversation <id>` ``.
+
 ## 4. Run onboarding
 
 Start Takopi without a config file. It will detect this and launch the setup wizard:

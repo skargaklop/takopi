@@ -1,5 +1,11 @@
 # changelog
 
+## v0.25.0 (2026-07-18)
+
+### features
+
+- add Antigravity CLI engine (`agy`) via headless plain-text `-p` mode with `--conversation` resume
+
 ## v0.24.0 (2026-07-18)
 
 ### features

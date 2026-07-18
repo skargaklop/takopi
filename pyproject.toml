@@ -1,7 +1,7 @@
 [project]
 name = "takopi"
 authors = [{name = "banteg"}]
-version = "0.24.0"
+version = "0.25.0"
 description = "Telegram bridge for Codex, Claude Code, and other agent CLIs."
 readme = "readme.md"
 license = { file = "LICENSE" }
@@ -46,6 +46,7 @@ opencode = "takopi.runners.opencode:BACKEND"
 pi = "takopi.runners.pi:BACKEND"
 omp = "takopi.runners.omp:BACKEND"
 grok = "takopi.runners.grok:BACKEND"
+agy = "takopi.runners.agy:BACKEND"
 
 [project.entry-points."takopi.transport_backends"]
 telegram = "takopi.telegram.backend:BACKEND"

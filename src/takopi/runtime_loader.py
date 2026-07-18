@@ -18,6 +18,31 @@ from .transport_runtime import TransportRuntime
 logger = get_logger(__name__)
 
 
+def _cli_is_available(cmd: str, runner: Any) -> bool:
+    """True if the engine CLI is resolvable via PATH or an absolute/config path."""
+    if shutil.which(cmd) is not None:
+        return True
+    try:
+        if Path(cmd).expanduser().is_file():
+            return True
+    except OSError:
+        pass
+    command = getattr(runner, "command", None)
+    if callable(command):
+        try:
+            resolved = command()
+        except Exception:  # noqa: BLE001
+            return False
+        if isinstance(resolved, str) and resolved:
+            if shutil.which(resolved) is not None:
+                return True
+            try:
+                return Path(resolved).expanduser().is_file()
+            except OSError:
+                return False
+    return False
+
+
 @dataclass(frozen=True, slots=True)
 class RuntimeSpec:
     router: AutoRouter
@@ -115,7 +140,7 @@ def build_router(
                 continue
 
         cmd = backend.cli_cmd or backend.id
-        if shutil.which(cmd) is None:
+        if not _cli_is_available(cmd, runner):
             status = "missing_cli"
             if issue:
                 issue = f"{issue}; {cmd} not found on PATH"
