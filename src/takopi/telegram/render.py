@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html as html_lib
 import re
 from dataclasses import dataclass
 from typing import Any
@@ -15,12 +16,31 @@ MAX_BODY_CHARS = 3500
 # commonmark + GFM strikethrough (~~text~~). Keep html=False so agent/user
 # content cannot inject raw HTML. Blockquotes and emphasis are already
 # commonmark and map to Telegram blockquote/bold/italic entities via sulguk.
+# Extra chat markup (outside code): ||spoiler||, ~strike~, ++underline++.
 _MD_RENDERER = MarkdownIt("commonmark", {"html": False}).enable("strikethrough")
 _BULLET_RE = re.compile(r"(?m)^(\s*)•")
 _FENCE_RE = re.compile(r"^(?P<indent>[ \t]*)(?P<fence>[`~]{3,})(?P<info>.*)$")
 _SENTENCE_BOUNDARY_RE = re.compile(r"(?<=[.!?])\s+")
 _ORDERED_ITEM_RE = re.compile(r"^(?P<indent>[ \t]{0,3})(?P<marker>\d+[.)])\s+")
 _UNORDERED_ITEM_RE = re.compile(r"^(?P<indent>[ \t]{0,3})[-+*]\s+")
+
+# Telegram-friendly chat extensions (applied outside fenced/inline code).
+_FENCED_BLOCK_RE = re.compile(
+    r"(?ms)^(?P<indent>[ \t]{0,3})(?P<fence>`{3,}|~{3,})(?P<info>[^\n]*)\n"
+    r"(?P<body>.*?)"
+    r"^(?P=indent)(?P=fence)[ \t]*$"
+)
+_INLINE_CODE_RE = re.compile(r"(?P<code>`+)(?P<body>.+?)(?P=code)")
+_SPOILER_RE = re.compile(r"\|\|(?P<body>[^|\n]+?)\|\|")
+_UNDERLINE_RE = re.compile(r"\+\+(?P<body>[^+\n]+?)\+\+")
+_SINGLE_STRIKE_RE = re.compile(r"(?<!~)~(?P<body>[^~\n]+?)~(?!~)")
+
+# Private-use markers survive markdown-it text nodes for post-HTML expansion.
+_MARK_SPOILER_OPEN = "\ue010"
+_MARK_SPOILER_CLOSE = "\ue011"
+_MARK_UNDERLINE_OPEN = "\ue012"
+_MARK_UNDERLINE_CLOSE = "\ue013"
+_CODE_PLACEHOLDER = "\ue020{0}\ue021"
 
 
 @dataclass(frozen=True, slots=True)
@@ -77,8 +97,86 @@ def _normalize_nested_list_markers(md: str) -> str:
     return "".join(lines)
 
 
+def _protect_code_regions(md: str) -> tuple[str, list[str]]:
+    """Replace fenced blocks and inline code with placeholders (fences first)."""
+    buckets: list[str] = []
+
+    def stash(chunk: str) -> str:
+        idx = len(buckets)
+        buckets.append(chunk)
+        return _CODE_PLACEHOLDER.format(idx)
+
+    def stash_fence(match: re.Match[str]) -> str:
+        return stash(match.group(0))
+
+    protected = _FENCED_BLOCK_RE.sub(stash_fence, md)
+
+    def stash_inline(match: re.Match[str]) -> str:
+        return stash(match.group(0))
+
+    protected = _INLINE_CODE_RE.sub(stash_inline, protected)
+    return protected, buckets
+
+
+def _restore_code_regions(md: str, buckets: list[str]) -> str:
+    def restore(match: re.Match[str]) -> str:
+        idx = int(match.group(1))
+        if 0 <= idx < len(buckets):
+            return buckets[idx]
+        return match.group(0)
+
+    return re.sub(r"\ue020(\d+)\ue021", restore, md)
+
+
+def _apply_chat_markup_extensions(md: str) -> str:
+    """Map Telegram-friendly chat markup to markers / GFM outside code regions."""
+    if not md:
+        return md
+    protected, buckets = _protect_code_regions(md)
+
+    def spoiler(match: re.Match[str]) -> str:
+        return f"{_MARK_SPOILER_OPEN}{match.group('body')}{_MARK_SPOILER_CLOSE}"
+
+    def underline(match: re.Match[str]) -> str:
+        return f"{_MARK_UNDERLINE_OPEN}{match.group('body')}{_MARK_UNDERLINE_CLOSE}"
+
+    def single_strike(match: re.Match[str]) -> str:
+        # Reuse GFM strikethrough so sulguk sees <s>.
+        return f"~~{match.group('body')}~~"
+
+    protected = _SPOILER_RE.sub(spoiler, protected)
+    protected = _UNDERLINE_RE.sub(underline, protected)
+    protected = _SINGLE_STRIKE_RE.sub(single_strike, protected)
+    return _restore_code_regions(protected, buckets)
+
+
+def _expand_chat_markup_markers_in_html(html: str) -> str:
+    def spoiler(match: re.Match[str]) -> str:
+        return f"<tg-spoiler>{html_lib.escape(match.group(1))}</tg-spoiler>"
+
+    def underline(match: re.Match[str]) -> str:
+        return f"<u>{html_lib.escape(match.group(1))}</u>"
+
+    html = re.sub(
+        f"{re.escape(_MARK_SPOILER_OPEN)}(.*?){re.escape(_MARK_SPOILER_CLOSE)}",
+        spoiler,
+        html,
+        flags=re.DOTALL,
+    )
+    html = re.sub(
+        f"{re.escape(_MARK_UNDERLINE_OPEN)}(.*?){re.escape(_MARK_UNDERLINE_CLOSE)}",
+        underline,
+        html,
+        flags=re.DOTALL,
+    )
+    return html
+
+
 def render_markdown(md: str) -> tuple[str, list[dict[str, Any]]]:
-    html = _MD_RENDERER.render(_normalize_nested_list_markers(md or ""))
+    normalized = _normalize_nested_list_markers(md or "")
+    expanded = _apply_chat_markup_extensions(normalized)
+    html = _MD_RENDERER.render(expanded)
+    html = _expand_chat_markup_markers_in_html(html)
     rendered = transform_html(html)
 
     text = _BULLET_RE.sub(r"\1-", rendered.text)

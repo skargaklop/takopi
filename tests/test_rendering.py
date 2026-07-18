@@ -21,11 +21,113 @@ def test_render_markdown_strikethrough() -> None:
     assert any(e.get("type") == "strikethrough" for e in entities)
 
 
+def test_render_markdown_single_tilde_strikethrough() -> None:
+    text, entities = render_markdown("~Strikethrough~")
+
+    assert "Strikethrough" in text
+    assert "~" not in text.replace("\n", "")
+    assert any(e.get("type") == "strikethrough" for e in entities)
+
+
+def test_render_markdown_spoiler() -> None:
+    text, entities = render_markdown("||Spoiler text||")
+
+    assert "Spoiler text" in text
+    assert "||" not in text
+    assert any(e.get("type") == "spoiler" for e in entities)
+
+
+def test_render_markdown_underline() -> None:
+    text, entities = render_markdown("++Underlined text++")
+
+    assert "Underlined text" in text
+    assert "++" not in text
+    assert any(e.get("type") == "underline" for e in entities)
+
+
+def test_render_markdown_chat_markup_skips_code() -> None:
+    text, entities = render_markdown("use `||not spoiler||` and ~~real~~")
+
+    assert "||not spoiler||" in text
+    assert any(e.get("type") == "strikethrough" for e in entities)
+    assert not any(e.get("type") == "spoiler" for e in entities)
+
+
 def test_render_markdown_blockquote() -> None:
     text, entities = render_markdown("> quoted line\n")
 
     assert "quoted line" in text
     assert any(e.get("type") == "blockquote" for e in entities)
+
+
+def test_render_markdown_telegram_smoke_sample() -> None:
+    """Full smoke sample matching Telegram-oriented chat markdown."""
+    src = """\
+**Bold text**
+*Italic text*
+++Underlined text++
+~Strikethrough~
+||Spoiler text||
+
+Inline code: `const hello = "world"`
+
+Code block:
+
+```js
+function greet(name) {
+  return `Hello, ${name}!`;
+}
+```
+
+Link: [xAI](https://x.ai/)
+
+- Bullet one
+- Bullet two
+- Bullet three
+1. First item
+2. Second item
+3. Third item
+
+> Blockquote: if this looks quoted, markdown is working.
+
+Mix: **bold**, *italic*, `code`, and a [link](https://telegram.org/).
+"""
+    text, entities = render_markdown(src)
+    types = {e.get("type") for e in entities}
+
+    assert "Bold text" in text
+    assert "Italic text" in text
+    assert "Underlined text" in text
+    assert "Strikethrough" in text
+    assert "Spoiler text" in text
+    assert 'const hello = "world"' in text
+    assert "function greet(name)" in text
+    assert "${name}" in text or "Hello," in text
+    assert "xAI" in text
+    assert "Bullet one" in text
+    assert "First item" in text
+    assert "Blockquote" in text
+
+    for required in (
+        "bold",
+        "italic",
+        "underline",
+        "strikethrough",
+        "spoiler",
+        "code",
+        "pre",
+        "text_link",
+        "blockquote",
+    ):
+        assert required in types, f"missing entity type {required}: {types}"
+
+    assert any(
+        e.get("type") == "text_link" and e.get("url") == "https://x.ai/" for e in entities
+    )
+    assert any(
+        e.get("type") == "text_link" and e.get("url") == "https://telegram.org/"
+        for e in entities
+    )
 
 
 def test_render_markdown_italic_and_nested() -> None:

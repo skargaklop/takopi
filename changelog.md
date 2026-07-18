@@ -5,7 +5,7 @@
 ### features
 
 - add Grok Build CLI engine runner (`grok`) via headless streaming-json
-- richer Telegram progress headers (bold status, monospaced engine) and GFM strikethrough in markdown rendering
+- richer Telegram progress headers (bold status, monospaced engine) and chat markdown: GFM/single-tilde strikethrough, `||spoiler||`, `++underline++`, blockquotes
 
 ### fixes
 
