@@ -176,3 +176,64 @@ async def test_decode_result_invalid_payload_returns_none() -> None:
     client = HttpBotClient("token", http_client=httpx.AsyncClient())
     assert client._decode_result(method="getMe", payload=["bad"], model=User) is None
     await client.close()
+
+
+@pytest.mark.anyio
+async def test_edit_message_text_not_modified_is_success(caplog) -> None:
+    """Telegram 400 'message is not modified' is a benign no-op, not a hard error."""
+    import logging
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path.endswith("/editMessageText")
+        return httpx.Response(
+            400,
+            request=request,
+            json={
+                "ok": False,
+                "error_code": 400,
+                "description": (
+                    "Bad Request: message is not modified: specified new message "
+                    "content and reply markup are exactly the same as a current "
+                    "content and reply markup of the message"
+                ),
+            },
+        )
+
+    transport = httpx.MockTransport(handler)
+    async with httpx.AsyncClient(transport=transport) as http:
+        client = HttpBotClient("token", http_client=http)
+        with caplog.at_level(logging.ERROR, logger="takopi.telegram.client_api"):
+            edited = await client.edit_message_text(
+                chat_id=42,
+                message_id=7,
+                text="same",
+            )
+
+    assert edited is not None
+    assert edited.message_id == 7
+    assert edited.chat.id == 42
+    assert edited.text == "same"
+    assert not any(
+        "telegram.http_error" in rec.message or rec.__dict__.get("event") == "telegram.http_error"
+        for rec in caplog.records
+    )
+    # structlog may put event name in message or as attribute
+    error_events = [
+        rec
+        for rec in caplog.records
+        if "http_error" in rec.getMessage().lower()
+        or getattr(rec, "event", None) == "telegram.http_error"
+    ]
+    assert error_events == []
+
+
+def test_is_message_not_modified_helper() -> None:
+    from takopi.telegram.client_api import is_message_not_modified
+
+    assert is_message_not_modified(
+        "Bad Request: message is not modified: specified new message content"
+    )
+    assert is_message_not_modified("MESSAGE IS NOT MODIFIED")
+    assert not is_message_not_modified("Bad Request: chat not found")
+    assert not is_message_not_modified(None)
+    assert not is_message_not_modified("")

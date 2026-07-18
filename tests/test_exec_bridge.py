@@ -1,3 +1,4 @@
+import contextlib
 import uuid
 
 import anyio
@@ -249,6 +250,43 @@ async def test_long_final_message_edits_progress_message() -> None:
     assert transport.send_calls[0]["options"].notify is False
     assert transport.edit_calls
     assert "done" in transport.edit_calls[-1]["message"].text.lower()
+
+
+@pytest.mark.anyio
+async def test_progress_edits_skip_unchanged_payload() -> None:
+    """Identical consecutive progress renders must not call transport.edit."""
+    from takopi.progress import ProgressTracker
+    from takopi.runner_bridge import ProgressEdits
+
+    transport = FakeTransport()
+    tracker = ProgressTracker(engine=CODEX_ENGINE)
+    progress_ref = MessageRef(channel_id=1, message_id=99)
+    presenter = MarkdownPresenter()
+    state = tracker.snapshot()
+    initial = presenter.render_progress(state, elapsed_s=0.0, label="working")
+
+    edits = ProgressEdits(
+        transport=transport,
+        presenter=presenter,
+        channel_id=1,
+        progress_ref=progress_ref,
+        tracker=tracker,
+        started_at=0.0,
+        clock=lambda: 0.0,
+        last_rendered=initial,
+        label="working",
+    )
+
+    # Force a re-render signal without state change (same elapsed, same actions).
+    edits.event_seq = 1
+    edits.rendered_seq = 0
+    with contextlib.suppress(anyio.WouldBlock):
+        edits.signal_send.send_nowait(None)
+    await edits.signal_send.aclose()
+
+    await edits.run()
+
+    assert transport.edit_calls == []
 
 
 @pytest.mark.anyio

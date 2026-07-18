@@ -50,7 +50,8 @@ def format_header(
     elapsed_s: float, item: int | None, *, label: str, engine: str
 ) -> str:
     elapsed = format_elapsed(elapsed_s)
-    parts = [label, engine]
+    # Bold status + monospaced engine so Telegram entities make the header scannable.
+    parts = [f"**{label}**", f"`{engine}`"]
     parts.append(elapsed)
     if item is not None:
         parts.append(f"step {item}")

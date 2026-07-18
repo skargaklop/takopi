@@ -12,6 +12,29 @@ logger = get_logger(__name__)
 
 T = TypeVar("T")
 _NETWORK_RETRY_AFTER_S = 2.0
+_MESSAGE_NOT_MODIFIED = "message is not modified"
+
+
+def is_message_not_modified(description: str | None) -> bool:
+    """Return True for Telegram's benign editMessageText no-op error."""
+    if not description:
+        return False
+    return _MESSAGE_NOT_MODIFIED in description.lower()
+
+
+def _not_modified_edit_result(request_payload: Any) -> dict[str, Any] | None:
+    """Build a synthetic Message-shaped result when Telegram reports not-modified."""
+    if not isinstance(request_payload, dict):
+        return None
+    chat_id = request_payload.get("chat_id")
+    message_id = request_payload.get("message_id")
+    if chat_id is None or message_id is None:
+        return None
+    return {
+        "message_id": message_id,
+        "chat": {"id": chat_id, "type": "private"},
+        "text": request_payload.get("text"),
+    }
 
 
 class RetryAfter(Exception):
@@ -174,6 +197,18 @@ class HttpBotClient:
                     retry_after=retry_after,
                 )
                 raise TelegramRetryAfter(retry_after)
+            description = payload.get("description")
+            if is_message_not_modified(
+                description if isinstance(description, str) else None
+            ):
+                logger.debug(
+                    "telegram.edit_not_modified",
+                    method=method,
+                    url=str(resp.request.url),
+                    description=description,
+                )
+                # Envelope path has no request body; return empty success marker.
+                return True
             logger.error(
                 "telegram.api_error",
                 method=method,
@@ -235,6 +270,29 @@ class HttpBotClient:
                 )
                 raise TelegramRetryAfter(retry_after) from exc
             body = resp.text
+            description: str | None = None
+            try:
+                error_payload = resp.json()
+            except Exception:  # noqa: BLE001
+                error_payload = None
+            if isinstance(error_payload, dict):
+                raw_desc = error_payload.get("description")
+                if isinstance(raw_desc, str):
+                    description = raw_desc
+            if resp.status_code == 400 and (
+                is_message_not_modified(description) or is_message_not_modified(body)
+            ):
+                logger.debug(
+                    "telegram.edit_not_modified",
+                    method=method,
+                    status=resp.status_code,
+                    url=str(resp.request.url),
+                    description=description or body,
+                )
+                synthetic = _not_modified_edit_result(request_payload)
+                if synthetic is not None:
+                    return synthetic
+                return True
             logger.error(
                 "telegram.http_error",
                 method=method,

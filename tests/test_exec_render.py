@@ -163,7 +163,7 @@ def test_progress_renderer_renders_progress_and_final() -> None:
     formatter = MarkdownFormatter(max_actions=5)
     progress_parts = formatter.render_progress_parts(state, elapsed_s=3.0)
     progress = assemble_markdown_parts(progress_parts)
-    assert progress.startswith("working · codex · 3s · step 2")
+    assert progress.startswith("**working** · `codex` · 3s · step 2")
     assert "✓ `bash -lc ls`" in progress
     assert "`codex resume 0199a213-81c0-7800-8aa1-bbab2a035a53`" in progress
 
@@ -171,7 +171,7 @@ def test_progress_renderer_renders_progress_and_final() -> None:
         state, elapsed_s=3.0, status="done", answer="answer"
     )
     final = assemble_markdown_parts(final_parts)
-    assert final.startswith("done · codex · 3s · step 2")
+    assert final.startswith("**done** · `codex` · 3s · step 2")
     assert "✓ `bash -lc ls`" not in final
     assert "Checking repository root for README" not in final
     assert "answer" in final
@@ -436,4 +436,4 @@ def test_progress_renderer_ignores_missing_action_id() -> None:
     header = assemble_markdown_parts(
         formatter.render_progress_parts(tracker.snapshot(), elapsed_s=0.0)
     )
-    assert header.startswith("working · codex · 0s")
+    assert header.startswith("**working** · `codex` · 0s")

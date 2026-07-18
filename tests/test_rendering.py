@@ -13,6 +13,31 @@ def test_render_markdown_basic_entities() -> None:
     ]
 
 
+def test_render_markdown_strikethrough() -> None:
+    text, entities = render_markdown("~~deleted~~")
+
+    assert "deleted" in text
+    assert "~~" not in text
+    assert any(e.get("type") == "strikethrough" for e in entities)
+
+
+def test_render_markdown_blockquote() -> None:
+    text, entities = render_markdown("> quoted line\n")
+
+    assert "quoted line" in text
+    assert any(e.get("type") == "blockquote" for e in entities)
+
+
+def test_render_markdown_italic_and_nested() -> None:
+    text, entities = render_markdown("*italic* and ***both***")
+
+    assert "italic" in text
+    assert "both" in text
+    types = {e.get("type") for e in entities}
+    assert "italic" in types
+    assert "bold" in types
+
+
 def test_render_markdown_code_fence_language_is_string() -> None:
     text, entities = render_markdown("```py\nprint('x')\n```")
 

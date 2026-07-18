@@ -1,5 +1,16 @@
 # changelog
 
+## v0.24.0 (2026-07-18)
+
+### features
+
+- add Grok Build CLI engine runner (`grok`) via headless streaming-json
+- richer Telegram progress headers (bold status, monospaced engine) and GFM strikethrough in markdown rendering
+
+### fixes
+
+- treat Telegram `editMessageText` 400 "message is not modified" as a benign no-op instead of `telegram.http_error`
+
 ## v0.23.4 (2026-05-25)
 
 ### changes

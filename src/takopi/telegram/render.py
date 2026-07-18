@@ -12,7 +12,10 @@ from ..markdown import MarkdownParts, assemble_markdown_parts
 
 MAX_BODY_CHARS = 3500
 
-_MD_RENDERER = MarkdownIt("commonmark", {"html": False})
+# commonmark + GFM strikethrough (~~text~~). Keep html=False so agent/user
+# content cannot inject raw HTML. Blockquotes and emphasis are already
+# commonmark and map to Telegram blockquote/bold/italic entities via sulguk.
+_MD_RENDERER = MarkdownIt("commonmark", {"html": False}).enable("strikethrough")
 _BULLET_RE = re.compile(r"(?m)^(\s*)•")
 _FENCE_RE = re.compile(r"^(?P<indent>[ \t]*)(?P<fence>[`~]{3,})(?P<info>.*)$")
 _SENTENCE_BOUNDARY_RE = re.compile(r"(?<=[.!?])\s+")
