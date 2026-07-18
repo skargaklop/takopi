@@ -1,5 +1,13 @@
 # changelog
 
+## v0.26.0 (2026-07-18)
+
+### features
+
+- Telegram image support for all engines: save photos under `incoming/images/`, append path annotations to prompts, optional image-only default prompt
+- Codex native `-i` image args; Pi/OMP `@path` attachment args via run options
+- New files settings: `image_subdir`, `image_default_prompt`, `image_force_prompt`
+
 ## v0.25.0 (2026-07-18)
 
 ### features

@@ -291,6 +291,31 @@ class TransportRuntime:
             return None
         return RunContext(project=project_key, branch=None)
 
+    def default_project_key(self) -> str | None:
+        return self._projects.default_project
+
+    def resolve_upload_context(
+        self,
+        *,
+        resolved: RunContext | None,
+        ambient: RunContext | None,
+        chat_id: int | None = None,
+    ) -> RunContext | None:
+        """Pick a project root for file/image uploads.
+
+        Order: explicit resolve → ambient → chat-bound project → default_project.
+        """
+        for ctx in (resolved, ambient):
+            if ctx is not None and ctx.project is not None:
+                return ctx
+        chat_ctx = self.default_context_for_chat(chat_id)
+        if chat_ctx is not None:
+            return chat_ctx
+        default_key = self.default_project_key()
+        if default_key is not None:
+            return RunContext(project=default_key, branch=None)
+        return None
+
     def project_chat_ids(self) -> tuple[int, ...]:
         return self._projects.project_chat_ids()
 

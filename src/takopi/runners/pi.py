@@ -364,6 +364,13 @@ class PiRunner(ResumeTokenMixin, JsonlSubprocessRunner):
             args.extend(["--thinking", str(run_options.reasoning)])
         session_value = self._resolve_session_path(state.resume.value)
         args.extend(["--session", session_value])
+        # Layer B: pi accepts @file references in the initial message list.
+        if run_options is not None:
+            args.extend(
+                f"@{attachment.rel_path}"
+                for attachment in run_options.attachments
+                if attachment.kind == "image" and attachment.rel_path
+            )
         args.append(self._sanitize_prompt(prompt))
         return args
 

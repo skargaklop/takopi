@@ -7,7 +7,12 @@ from ...context import RunContext
 from ...directives import DirectiveError
 from ...transport_runtime import ResolvedMessage
 from ..context import _merge_topic_context
-from ..files import parse_file_command
+from ...runners.run_options import PromptAttachment
+from ..files import (
+    format_image_prompt_annotation,
+    is_image_document,
+    parse_file_command,
+)
 from ..topic_state import TopicStateStore
 from ..topics import _topic_key, _topics_chat_project
 from ..types import TelegramIncomingMessage
@@ -74,11 +79,24 @@ async def _handle_media_group(
             return
     if cfg.files.enabled and cfg.files.auto_put:
         caption_text = command_msg.text.strip()
-        if cfg.files.auto_put_mode == "prompt" and caption_text:
+        docs = [m.document for m in ordered if m.document is not None]
+        has_image = any(
+            is_image_document(
+                mime_type=d.mime_type,
+                file_name=d.file_name,
+                raw=d.raw,
+            )
+            for d in docs
+        )
+        force_image_prompt = has_image and cfg.files.image_force_prompt
+        if (cfg.files.auto_put_mode == "prompt" and caption_text) or force_image_prompt:
+            prompt_caption = (
+                caption_text if caption_text else cfg.files.image_default_prompt
+            )
             if resolve_prompt is None:
                 try:
                     resolved = cfg.runtime.resolve_message(
-                        text=caption_text,
+                        text=prompt_caption,
                         reply_text=command_msg.reply_to_text,
                         ambient_context=ambient_context,
                         chat_id=command_msg.chat_id,
@@ -88,7 +106,7 @@ async def _handle_media_group(
                     return
             else:
                 resolved = await resolve_prompt(
-                    command_msg, caption_text, ambient_context
+                    command_msg, prompt_caption, ambient_context
                 )
             if resolved is None:
                 return
@@ -121,14 +139,34 @@ async def _handle_media_group(
                 for item in saved_group.saved
                 if item.rel_path is not None
             ]
-            files_text = "\n".join(f"- {path}" for path in paths)
+            if has_image:
+                annotation = format_image_prompt_annotation(paths)
+            else:
+                files_text = "\n".join(f"- {path}" for path in paths)
+                annotation = f"[uploaded files]\n{files_text}"
             prompt_base = resolved.prompt
-            annotation = f"[uploaded files]\n{files_text}"
             if prompt_base and prompt_base.strip():
                 prompt = f"{prompt_base}\n\n{annotation}"
             else:
                 prompt = annotation
-            await run_prompt(command_msg, prompt, resolved)
+            attachments: tuple[PromptAttachment, ...] = ()
+            if saved_group.run_root is not None:
+                attachments = tuple(
+                    PromptAttachment(
+                        rel_path=item.rel_path.as_posix(),
+                        abs_path=str(
+                            (saved_group.run_root / item.rel_path).resolve()
+                        ),
+                        kind="image" if has_image else "file",
+                    )
+                    for item in saved_group.saved
+                    if item.rel_path is not None
+                )
+            # run_prompt signature may accept optional attachments
+            try:
+                await run_prompt(command_msg, prompt, resolved, attachments)  # type: ignore[misc]
+            except TypeError:
+                await run_prompt(command_msg, prompt, resolved)
             return
         if not caption_text:
             await _handle_file_put_group(

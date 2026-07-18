@@ -106,6 +106,12 @@ class OmpRunner(PiRunner):
             args.extend(["--thinking", str(run_options.reasoning)])
         if resume is not None:
             args.extend(["--resume", resume.value])
+        if run_options is not None:
+            args.extend(
+                f"@{attachment.rel_path}"
+                for attachment in run_options.attachments
+                if attachment.kind == "image" and attachment.rel_path
+            )
         args.append(self._sanitize_prompt(prompt))
         return args
 

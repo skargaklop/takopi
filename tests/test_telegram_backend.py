@@ -182,4 +182,7 @@ def test_telegram_files_settings_defaults() -> None:
     assert cfg.auto_put is True
     assert cfg.auto_put_mode == "upload"
     assert cfg.uploads_dir == "incoming"
+    assert cfg.image_subdir == "images"
+    assert cfg.image_default_prompt == "Describe this image."
+    assert cfg.image_force_prompt is True
     assert cfg.allowed_user_ids == []

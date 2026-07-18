@@ -499,6 +499,9 @@ class CodexRunner(ResumeTokenMixin, JsonlSubprocessRunner):
                         f"model_reasoning_effort={run_options.reasoning}",
                     ]
                 )
+            for attachment in run_options.attachments:
+                if attachment.kind == "image" and attachment.abs_path:
+                    args.extend(["-i", attachment.abs_path])
         args.extend(
             [
                 "exec",

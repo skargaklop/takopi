@@ -80,6 +80,9 @@ class TelegramFilesSettings(BaseModel):
     auto_put: bool = True
     auto_put_mode: Literal["upload", "prompt"] = "upload"
     uploads_dir: NonEmptyStr = "incoming"
+    image_subdir: NonEmptyStr = "images"
+    image_default_prompt: NonEmptyStr = "Describe this image."
+    image_force_prompt: bool = True
     allowed_user_ids: list[StrictInt] = Field(default_factory=list)
     deny_globs: list[NonEmptyStr] = Field(
         default_factory=lambda: [
@@ -91,11 +94,11 @@ class TelegramFilesSettings(BaseModel):
         ]
     )
 
-    @field_validator("uploads_dir")
+    @field_validator("uploads_dir", "image_subdir")
     @classmethod
-    def _validate_uploads_dir(cls, value: str) -> str:
+    def _validate_relative_dir(cls, value: str) -> str:
         if Path(value).is_absolute():
-            raise ValueError("files.uploads_dir must be a relative path")
+            raise ValueError("path must be relative")
         return value
 
 

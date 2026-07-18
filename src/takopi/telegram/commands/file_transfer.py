@@ -15,6 +15,8 @@ from ..files import (
     default_upload_path,
     deny_reason,
     format_bytes,
+    image_upload_path,
+    is_image_document,
     normalize_relative_path,
     parse_file_command,
     parse_file_prompt,
@@ -56,6 +58,7 @@ class _SavedFilePut:
     context: RunContext | None
     rel_path: Path
     size: int
+    run_root: Path
 
 
 @dataclass(slots=True)
@@ -64,6 +67,7 @@ class _SavedFilePutGroup:
     base_dir: Path | None
     saved: list[_FilePutResult]
     failed: list[_FilePutResult]
+    run_root: Path | None = None
 
 
 def resolve_file_put_paths(
@@ -147,16 +151,41 @@ async def _prepare_file_put_plan(
         context=resolved.context,
         context_source=resolved.context_source,
     )
-    if resolved.context is None or resolved.context.project is None:
-        await reply(text="no project context available for file upload.")
+    upload_context = cfg.runtime.resolve_upload_context(
+        resolved=resolved.context,
+        ambient=ambient_context,
+        chat_id=msg.chat_id,
+    )
+    if upload_context is None or upload_context.project is None:
+        await reply(
+            text=(
+                "no project context available for file upload.\n"
+                "bind with `/ctx set <project>` (or `/topic <project> @branch`), "
+                "or set `default_project` in takopi.toml."
+            )
+        )
         return None
+    # Ensure ResolvedMessage carries the project used for the upload root.
+    if resolved.context is None or resolved.context.project is None:
+        resolved = ResolvedMessage(
+            prompt=resolved.prompt,
+            resume_token=resolved.resume_token,
+            engine_override=resolved.engine_override,
+            context=upload_context,
+            context_source=resolved.context_source or "default_project",
+        )
     try:
-        run_root = cfg.runtime.resolve_run_cwd(resolved.context)
+        run_root = cfg.runtime.resolve_run_cwd(upload_context)
     except ConfigError as exc:
         await reply(text=f"error:\n{exc}")
         return None
     if run_root is None:
-        await reply(text="no project context available for file upload.")
+        await reply(
+            text=(
+                "no project context available for file upload.\n"
+                "bind with `/ctx set <project>` or set `default_project` in takopi.toml."
+            )
+        )
         return None
     path_value, force, error = parse_file_prompt(resolved.prompt, allow_empty=True)
     if error is not None:
@@ -214,9 +243,22 @@ async def _save_document_payload(
     resolved_path = rel_path
     if resolved_path is None:
         if base_dir is None:
-            resolved_path = default_upload_path(
-                cfg.files.uploads_dir, document.file_name, file_path
-            )
+            if is_image_document(
+                mime_type=document.mime_type,
+                file_name=document.file_name,
+                file_path=file_path,
+                raw=document.raw,
+            ):
+                resolved_path = image_upload_path(
+                    cfg.files.uploads_dir,
+                    cfg.files.image_subdir,
+                    document.file_name,
+                    file_path,
+                )
+            else:
+                resolved_path = default_upload_path(
+                    cfg.files.uploads_dir, document.file_name, file_path
+                )
         else:
             resolved_path = base_dir / name
     deny_rule = deny_reason(resolved_path, cfg.files.deny_globs)
@@ -356,6 +398,7 @@ async def _save_file_put(
         context=plan.resolved.context,
         rel_path=result.rel_path,
         size=result.size,
+        run_root=plan.run_root,
     )
 
 
@@ -484,6 +527,7 @@ async def _save_file_put_group(
         base_dir=base_dir,
         saved=saved,
         failed=failed,
+        run_root=plan.run_root,
     )
 
 

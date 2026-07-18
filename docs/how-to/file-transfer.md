@@ -49,6 +49,30 @@ Examples:
 
 If you send a file **without a caption**, Takopi saves it to `incoming/<original_filename>`.
 
+### Send an image to the agent (vision)
+
+Photos and image documents are saved under `incoming/images/` (configurable) and the path is appended to the agent prompt so **every engine** can open them.
+
+With `image_force_prompt = true` (default when files are enabled in recommended config):
+
+1. Send a photo (optionally with a caption or `/claude …` / `/codex …` directive).
+2. Takopi downloads it into the active project, e.g. `incoming/images/photo_a1b2c3d4.jpg`.
+3. The run prompt includes an `[image]` / `[images]` block listing paths, then your caption (or `image_default_prompt` if empty).
+4. **Codex** also receives native `-i` flags; **Pi / OMP** receive `@path` references.
+
+Recommended settings:
+
+```toml
+[transports.telegram.files]
+enabled = true
+auto_put = true
+auto_put_mode = "prompt"
+uploads_dir = "incoming"
+image_subdir = "images"
+image_default_prompt = "Describe this image."
+image_force_prompt = true
+```
+
 Use `--force` to overwrite:
 
 ```

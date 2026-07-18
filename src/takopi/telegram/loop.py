@@ -16,7 +16,15 @@ from ..commands import list_command_ids
 from ..directives import DirectiveError
 from ..logging import get_logger
 from ..model import EngineId, ResumeToken
-from ..runners.run_options import EngineRunOptions
+from ..runners.run_options import (
+    EngineRunOptions,
+    PromptAttachment,
+    merge_run_options,
+)
+from .files import (
+    format_image_prompt_annotation,
+    is_image_document,
+)
 from ..scheduler import ThreadJob, ThreadScheduler
 from ..progress import ProgressTracker
 from ..settings import TelegramTransportSettings
@@ -1209,6 +1217,7 @@ async def run_main_loop(
                 | None = None,
                 engine_override: EngineId | None = None,
                 progress_ref: MessageRef | None = None,
+                attachments: tuple[PromptAttachment, ...] = (),
             ) -> None:
                 topic_key = (
                     (chat_id, thread_id)
@@ -1243,6 +1252,10 @@ async def run_main_loop(
                     chat_prefs=state.chat_prefs,
                     topic_store=state.topic_store,
                 )
+                if attachments:
+                    run_options = merge_run_options(
+                        run_options, attachments=attachments
+                    )
                 await run_engine(
                     exec_cfg=cfg.exec_cfg,
                     runtime=cfg.runtime,
@@ -1398,6 +1411,7 @@ async def run_main_loop(
                 chat_session_key: tuple[int, int | None] | None,
                 reply_ref: MessageRef | None,
                 reply_id: int | None,
+                attachments: tuple[PromptAttachment, ...] = (),
             ) -> None:
                 chat_id = msg.chat_id
                 user_msg_id = msg.message_id
@@ -1435,6 +1449,8 @@ async def run_main_loop(
                         reply_ref,
                         scheduler.note_thread_known,
                         engine_override,
+                        None,
+                        attachments,
                     )
                     return
                 progress_ref = await _send_queued_progress(
@@ -1461,6 +1477,7 @@ async def run_main_loop(
                 msg: TelegramIncomingMessage,
                 prompt_text: str,
                 resolved: ResolvedMessage,
+                attachments: tuple[PromptAttachment, ...] = (),
             ) -> None:
                 reply_id = msg.reply_to_message_id
                 reply_ref = (
@@ -1484,6 +1501,7 @@ async def run_main_loop(
                     chat_session_key=chat_session_key,
                     reply_ref=reply_ref,
                     reply_id=reply_id,
+                    attachments=attachments,
                 )
 
             async def _dispatch_pending_prompt(pending: _PendingPrompt) -> None:
@@ -1562,18 +1580,43 @@ async def run_main_loop(
                 )
                 if resolved is None:
                     return
+                # Prefer ambient context for upload root (topic/chat project);
+                # re-resolve inside save_file_put still honors default_project.
+                ambient_for_save = ambient_context
+                if resolved.context is not None and resolved.context.project is not None:
+                    ambient_for_save = resolved.context
                 saved = await save_file_put(
                     cfg,
                     msg,
                     "",
-                    resolved.context,
+                    ambient_for_save,
                     topic_store,
                 )
                 if saved is None:
                     return
-                annotation = f"[uploaded file: {saved.rel_path.as_posix()}]"
+                rel = saved.rel_path.as_posix()
+                is_img = msg.document is not None and is_image_document(
+                    mime_type=msg.document.mime_type,
+                    file_name=msg.document.file_name,
+                    raw=msg.document.raw,
+                )
+                if is_img:
+                    annotation = format_image_prompt_annotation([rel])
+                else:
+                    annotation = f"[uploaded file: {rel}]"
                 prompt = _build_upload_prompt(resolved.prompt, annotation)
-                await run_prompt_from_upload(msg, prompt, resolved)
+                abs_path = str((saved.run_root / saved.rel_path).resolve())
+                attachments = (
+                    PromptAttachment(
+                        rel_path=rel,
+                        abs_path=abs_path,
+                        mime_type=(
+                            msg.document.mime_type if msg.document is not None else None
+                        ),
+                        kind="image" if is_img else "file",
+                    ),
+                )
+                await run_prompt_from_upload(msg, prompt, resolved, attachments)
 
             media_group_buffer = MediaGroupBuffer(
                 task_group=tg,
@@ -1752,11 +1795,25 @@ async def run_main_loop(
                 if msg.document is not None:
                     if cfg.files.enabled and cfg.files.auto_put:
                         caption_text = text.strip()
-                        if cfg.files.auto_put_mode == "prompt" and caption_text:
+                        doc = msg.document
+                        is_img = is_image_document(
+                            mime_type=doc.mime_type,
+                            file_name=doc.file_name,
+                            raw=doc.raw,
+                        )
+                        force_image_prompt = is_img and cfg.files.image_force_prompt
+                        if (
+                            cfg.files.auto_put_mode == "prompt" and caption_text
+                        ) or force_image_prompt:
+                            prompt_caption = (
+                                caption_text
+                                if caption_text
+                                else cfg.files.image_default_prompt
+                            )
                             tg.start_soon(
                                 handle_prompt_upload,
                                 msg,
-                                caption_text,
+                                prompt_caption,
                                 ambient_context,
                                 state.topic_store,
                             )
