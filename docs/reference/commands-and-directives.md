@@ -57,8 +57,8 @@ This line is parsed from replies and takes precedence over new directives.
 | `/model` | Show/set the model override for the current scope. |
 | `/reasoning` | Show/set the reasoning override for the current scope. |
 | `/trigger` | Show/set trigger mode (mentions-only vs all). |
-| `/plan` | Show sticky plan mode; `/plan on` \| `off` \| `clear` for chat/topic scope. |
-| `/goal` | Help for goal mode (use the `/goal …` **message directive** to start a run). |
+| `/plan` | Show sticky plan mode; `/plan on` \| `off` \| `clear` for chat/topic scope. Free-form `/plan <prompt>` (optionally with `/engine`) starts a **plan-mode agent run**. |
+| `/goal` | Bare `/goal` shows help. `/goal <condition>` starts a **goal-mode agent run**. |
 | `/queue` | Show FIFO queue depth and previews for the active thread (reply to progress/final if needed). |
 | `/file put <path>` | Upload a document into the repo/worktree (requires file transfer enabled). |
 | `/file get <path>` | Fetch a file or directory back into Telegram. |

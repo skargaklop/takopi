@@ -61,6 +61,8 @@ from .commands.handlers import (
     handle_reasoning_command,
     handle_topic_command,
     handle_trigger_command,
+    is_sticky_goal_args,
+    is_sticky_plan_args,
     parse_callback_data,
     parse_slash_command,
     get_reserved_commands,
@@ -381,6 +383,11 @@ def _dispatch_builtin_command(
         return True
 
     if command_id == "plan":
+        # Sticky preference only: /plan, /plan on|off|clear|show
+        # Free-form (e.g. /plan /agy design …) falls through as a normal prompt
+        # so parse_directives can set plan mode and run the agent.
+        if not is_sticky_plan_args(args_text):
+            return False
         handler = partial(
             handle_plan_command,
             cfg,
@@ -396,6 +403,9 @@ def _dispatch_builtin_command(
         return True
 
     if command_id == "goal":
+        # Help-only when bare /goal; /goal <condition> falls through as a prompt.
+        if not is_sticky_goal_args(args_text):
+            return False
         handler = partial(
             handle_goal_command,
             cfg,

@@ -27,6 +27,30 @@ def _empty_projects() -> ProjectsConfig:
     return ProjectsConfig(projects={})
 
 
+# --- bot command vs prompt fallthrough ---
+
+
+def test_is_sticky_plan_args() -> None:
+    from takopi.telegram.commands.plan_cmd import is_sticky_plan_args
+
+    assert is_sticky_plan_args("") is True
+    assert is_sticky_plan_args("on") is True
+    assert is_sticky_plan_args("off") is True
+    assert is_sticky_plan_args("clear") is True
+    assert is_sticky_plan_args("show") is True
+    assert is_sticky_plan_args("/agy make a plan") is False
+    assert is_sticky_plan_args("make a plan how to make the world better") is False
+    assert is_sticky_plan_args("on extra") is False
+
+
+def test_is_sticky_goal_args() -> None:
+    from takopi.telegram.commands.goal_cmd import is_sticky_goal_args
+
+    assert is_sticky_goal_args("") is True
+    assert is_sticky_goal_args("   ") is True
+    assert is_sticky_goal_args("all tests pass") is False
+
+
 # --- directives ---
 
 

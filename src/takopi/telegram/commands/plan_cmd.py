@@ -16,7 +16,21 @@ from .reply import make_reply
 if TYPE_CHECKING:
     from ..bridge import TelegramBridgeConfig
 
-PLAN_USAGE = "usage: `/plan`, `/plan on`, `/plan off`, or `/plan clear`"
+PLAN_USAGE = (
+    "usage: `/plan`, `/plan on`, `/plan off`, `/plan clear`\n"
+    "or start a plan-mode run: `/plan <prompt>` "
+    "(e.g. `/plan /agy design the API`)"
+)
+
+_STICKY_PLAN_ACTIONS = frozenset({"on", "off", "clear", "show"})
+
+
+def is_sticky_plan_args(args_text: str) -> bool:
+    """True when /plan is the sticky preference command, not a plan-mode prompt."""
+    tokens = split_command_args(args_text)
+    if not tokens:
+        return True
+    return len(tokens) == 1 and tokens[0].lower() in _STICKY_PLAN_ACTIONS
 
 
 async def _resolve_sticky_plan(
@@ -102,4 +116,5 @@ async def _handle_plan_command(
             await reply(text=f"chat plan mode set to `{'on' if enabled else 'off'}`.")
         return
 
+    # Free-form args are handled by the loop as a normal prompt with /plan directive.
     await reply(text=PLAN_USAGE)

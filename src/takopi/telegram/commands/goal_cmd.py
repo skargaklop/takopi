@@ -16,12 +16,17 @@ if TYPE_CHECKING:
 GOAL_HELP = (
     "goal mode starts an autonomous loop until a condition is met "
     "(supported natively by Claude; best-effort on Grok).\n\n"
-    "usage (message directive):\n"
+    "usage:\n"
     "`/goal all tests pass and lint is clean`\n"
     "`/claude /goal CHANGELOG has this week's PRs`\n\n"
     "tip: pair with unattended permissions (yolo / skip-permissions) so the "
     "loop is not blocked on tool approval."
 )
+
+
+def is_sticky_goal_args(args_text: str) -> bool:
+    """True when /goal is help-only (no condition); free-form starts a goal run."""
+    return not (args_text or "").strip()
 
 
 async def _handle_goal_command(
@@ -37,16 +42,5 @@ async def _handle_goal_command(
 ) -> None:
     del ambient_context, topic_store, chat_prefs, resolved_scope, scope_chat_ids
     reply = make_reply(cfg, msg)
-    condition = (args_text or "").strip()
-    if not condition:
-        await reply(text=GOAL_HELP)
-        return
-    # Bot slash command with args: treat as a directed prompt via error pointing
-    # user to send as a normal message (directives need full resolve path).
-    await reply(
-        text=(
-            "to start a goal run, send a normal message (not only the bot command):\n"
-            f"`/goal {condition}`\n\n"
-            "optionally prefix an engine: `/claude /goal {condition}`"
-        )
-    )
+    # Free-form conditions are handled by the loop as a normal prompt with /goal.
+    await reply(text=GOAL_HELP)
