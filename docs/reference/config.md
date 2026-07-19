@@ -70,17 +70,32 @@ When `allowed_user_ids` is set, updates without a sender id (for example, some c
 
 | Key | Type | Default | Notes |
 |-----|------|---------|-------|
-| `enabled` | bool | `false` | Enable `/file put` and `/file get`. |
+| `enabled` | bool | `false` | Enable `/file put`, `/file get`, and agent → user outbound send. |
 | `auto_put` | bool | `true` | Auto-save uploads. |
 | `auto_put_mode` | `"upload"`\|`"prompt"` | `"upload"` | Whether uploads also start a run. |
 | `uploads_dir` | string | `"incoming"` | Relative path inside the repo/worktree. |
 | `allowed_user_ids` | int[] | `[]` | Allowed senders for file transfer; empty allows private chats (group usage requires admin). |
 | `deny_globs` | string[] | (defaults) | Glob denylist (e.g. `.git/**`, `**/*.pem`). |
+| `send_enabled` | bool | `true` | When `enabled` is true, allow agents to deliver files via Takopi markers. |
+| `send_extensions` | string[] | `.jpg` `.png` `.gif` `.pdf` `.md` `.html` `.doc` `.docx` `.xls` `.xlsx` | Whitelist of extensions for outbound send. |
+| `send_instruction` | bool | `true` | Append marker-protocol instructions to agent prompts. |
+| `plan_require_send` | bool | `true` | Plan mode must deliver at least one `.md` or `.html`. |
+| `plan_auto_file` | bool | `true` | If plan mode ends with no plan file, write `outgoing/plan-*.md` from the answer and send it. |
+| `outgoing_dir` | string | `"outgoing"` | Relative dir for plan auto-files. |
+| `max_send_files_per_run` | int | `10` | Cap on outbound files per run. |
+
+Agent outbound protocol (when `enabled` and `send_enabled`):
+
+```text
+[[takopi-send: relative/path/to/file.ext]]
+```
+
+Takopi validates the path (whitelist, deny_globs, project root, size), then sends a Telegram document. Markers are stripped from the chat text.
 
 File size limits (not configurable):
 
 - uploads: 20 MiB
-- downloads: 50 MiB
+- downloads / outbound send: 50 MiB
 
 ## `projects.<alias>`
 

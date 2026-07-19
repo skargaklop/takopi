@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from functools import partial
+from pathlib import Path
 from typing import cast
 
 import anyio
@@ -12,10 +13,15 @@ from ...config import ConfigError
 from ...context import RunContext
 from ...logging import bind_run_context, clear_context, get_logger
 from ...model import Action, ActionEvent, EngineId, ResumeToken, TakopiEvent
+from ...outbound_files import (
+    append_send_instruction,
+    process_outbound_answer,
+    settings_from_files_config,
+)
 from ...progress import ProgressTracker
 from ...router import RunnerUnavailableError
 from ...runner import Runner
-from ...runners.run_options import EngineRunOptions, apply_run_options
+from ...runners.run_options import EngineRunOptions, apply_run_options, get_run_options
 from ...runner_bridge import (
     ExecBridgeConfig,
     IncomingMessage as RunnerIncomingMessage,
@@ -25,7 +31,7 @@ from ...runner_bridge import (
 from ...scheduler import ThreadScheduler
 from ...transport import MessageRef, RenderedMessage, SendOptions
 from ...transport_runtime import TransportRuntime
-from ...utils.paths import reset_run_base_dir, set_run_base_dir
+from ...utils.paths import get_run_base_dir, reset_run_base_dir, set_run_base_dir
 from ..bridge import send_plain
 from ..engine_overrides import supports_reasoning
 
@@ -159,6 +165,8 @@ async def _run_engine(
     show_resume_line: bool = True,
     progress_ref: MessageRef | None = None,
     run_options: EngineRunOptions | None = None,
+    files_settings: object | None = None,
+    send_document: Callable[..., Awaitable[object]] | None = None,
 ) -> None:
     reply = partial(
         send_plain,
@@ -214,10 +222,59 @@ async def _run_engine(
                 run_fields["cwd"] = str(cwd)
             bind_run_context(**run_fields)
             context_line = runtime.format_context_line(context)
+            outbound = (
+                settings_from_files_config(files_settings)
+                if files_settings is not None
+                else None
+            )
+            plan_mode = bool(run_options is not None and run_options.plan)
+            agent_text = text
+            if outbound is not None and outbound.active:
+                # Prefer instruction flag on the raw files settings object.
+                instruct = bool(getattr(files_settings, "send_instruction", True))
+                if instruct:
+                    agent_text = append_send_instruction(
+                        text, settings=outbound, plan_mode=plan_mode
+                    )
+
+            async def process_outbound(answer: str) -> str:
+                if outbound is None or not outbound.active:
+                    return answer
+                root = get_run_base_dir() or cwd
+                opts = get_run_options()
+                is_plan = bool(opts is not None and opts.plan) or plan_mode
+                result = process_outbound_answer(
+                    answer,
+                    run_root=root,
+                    settings=outbound,
+                    plan_mode=is_plan,
+                )
+                if send_document is not None:
+                    for item in result.files:
+                        if not item.ok or item.content is None:
+                            continue
+                        try:
+                            await send_document(
+                                chat_id=chat_id,
+                                filename=item.filename or Path(item.rel_path).name,
+                                content=item.content,
+                                reply_to_message_id=user_msg_id,
+                                message_thread_id=thread_id,
+                                caption=f"`{item.rel_path}`",
+                            )
+                        except Exception as exc:  # noqa: BLE001
+                            logger.warning(
+                                "outbound.send_failed",
+                                path=item.rel_path,
+                                error=str(exc),
+                                error_type=exc.__class__.__name__,
+                            )
+                return result.answer
+
             incoming = RunnerIncomingMessage(
                 channel_id=chat_id,
                 message_id=user_msg_id,
-                text=text,
+                text=agent_text,
                 reply_to=reply_ref,
                 thread_id=thread_id,
             )
@@ -233,6 +290,9 @@ async def _run_engine(
                     running_tasks=running_tasks,
                     on_thread_known=on_thread_known,
                     progress_ref=progress_ref,
+                    process_outbound=process_outbound
+                    if outbound is not None and outbound.active
+                    else None,
                 )
         finally:
             reset_run_base_dir(run_base_token)

@@ -411,6 +411,7 @@ async def handle_message(
     | None = None,
     progress_ref: MessageRef | None = None,
     clock: Callable[[], float] = time.monotonic,
+    process_outbound: Callable[[str], Awaitable[str]] | None = None,
 ) -> None:
     logger.info(
         "handle.incoming",
@@ -583,6 +584,16 @@ async def handle_message(
             final_answer = f"{final_answer}\n\n{run_error}"
         else:
             final_answer = str(run_error)
+
+    if process_outbound is not None and run_ok is not False:
+        try:
+            final_answer = await process_outbound(final_answer)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "outbound.process_failed",
+                error=str(exc),
+                error_type=exc.__class__.__name__,
+            )
 
     status = (
         "error" if run_ok is False else ("done" if final_answer.strip() else "error")

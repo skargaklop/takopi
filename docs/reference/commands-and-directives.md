@@ -68,8 +68,16 @@ This line is parsed from replies and takes precedence over new directives.
 | `/plan` | Show sticky plan mode; `/plan on` \| `off` \| `clear` for chat/topic scope. Free-form `/plan <prompt>` (optionally with `/engine`) starts a **plan-mode agent run**. |
 | `/goal` | Bare `/goal` shows help. `/goal <condition>` starts a **goal-mode agent run**. |
 | `/queue` | Show FIFO queue depth and previews for the active thread (reply to progress/final if needed). |
-| `/file put <path>` | Upload a document into the repo/worktree (requires file transfer enabled). |
+| `/file put <path>` | Upload a document into the repo/worktree (requires `transports.telegram.files.enabled`). |
 | `/file get <path>` | Fetch a file or directory back into Telegram. |
+
+**Agent → user files (Takopi-mediated):** when files are enabled and `send_enabled` is true, agents may deliver files by writing under the project and including:
+
+```text
+[[takopi-send: relative/path/file.ext]]
+```
+
+Allowed extensions come from `send_extensions` (default: jpg/png/gif/pdf/md/html/doc/docx/xls/xlsx). In **plan mode**, a `.md` or `.html` delivery is required (`plan_require_send`); if missing, Takopi can auto-write `outgoing/plan-*.md` (`plan_auto_file`).
 | `/topic <project> @branch` | Create/bind a topic (topics enabled). |
 | `/ctx` | Show context binding (chat or topic). |
 | `/ctx set <project> @branch` | Update context binding. |

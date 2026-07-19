@@ -1420,6 +1420,8 @@ async def run_main_loop(
                     show_resume_line=show_resume_line,
                     progress_ref=progress_ref,
                     run_options=run_options,
+                    files_settings=cfg.files,
+                    send_document=cfg.bot.send_document,
                 )
 
             async def run_thread_job(job: ThreadJob) -> None:

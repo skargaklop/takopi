@@ -70,6 +70,20 @@ class TelegramTopicsSettings(BaseModel):
     scope: Literal["auto", "main", "projects", "all"] = "auto"
 
 
+_DEFAULT_SEND_EXTENSIONS: tuple[str, ...] = (
+    ".jpg",
+    ".png",
+    ".gif",
+    ".pdf",
+    ".md",
+    ".html",
+    ".doc",
+    ".docx",
+    ".xls",
+    ".xlsx",
+)
+
+
 class TelegramFilesSettings(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
 
@@ -93,13 +107,40 @@ class TelegramFilesSettings(BaseModel):
             ".ssh/**",
         ]
     )
+    # Agent → user outbound delivery (Takopi-mediated, not agent Telegram tools).
+    send_enabled: bool = True
+    send_extensions: list[NonEmptyStr] = Field(
+        default_factory=lambda: list(_DEFAULT_SEND_EXTENSIONS)
+    )
+    send_instruction: bool = True
+    plan_require_send: bool = True
+    plan_auto_file: bool = True
+    outgoing_dir: NonEmptyStr = "outgoing"
+    max_send_files_per_run: StrictInt = Field(default=10, ge=1)
 
-    @field_validator("uploads_dir", "image_subdir")
+    @field_validator("uploads_dir", "image_subdir", "outgoing_dir")
     @classmethod
     def _validate_relative_dir(cls, value: str) -> str:
         if Path(value).is_absolute():
             raise ValueError("path must be relative")
         return value
+
+    @field_validator("send_extensions")
+    @classmethod
+    def _normalize_send_extensions(cls, value: list[str]) -> list[str]:
+        out: list[str] = []
+        seen: set[str] = set()
+        for raw in value:
+            ext = raw.strip().lower()
+            if not ext:
+                continue
+            if not ext.startswith("."):
+                ext = f".{ext}"
+            if ext in seen:
+                continue
+            seen.add(ext)
+            out.append(ext)
+        return out
 
 
 class TelegramTransportSettings(BaseModel):
