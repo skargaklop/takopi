@@ -72,6 +72,7 @@ class TelegramPresenter:
         *,
         elapsed_s: float,
         label: str = "working",
+        steerable: bool = True,
     ) -> RenderedMessage:
         parts = self._formatter.render_progress_parts(
             state, elapsed_s=elapsed_s, label=label
@@ -80,7 +81,9 @@ class TelegramPresenter:
         if _is_terminal_progress_label(label):
             reply_markup = CLEAR_MARKUP
         elif label.strip().lower() == "queued":
-            reply_markup = STEER_CANCEL_MARKUP
+            # Mid-turn steer only works when the active runner exposes turn control
+            # (currently Codex app-server). Otherwise offer cancel only.
+            reply_markup = STEER_CANCEL_MARKUP if steerable else CANCEL_MARKUP
         else:
             reply_markup = CANCEL_MARKUP
         return RenderedMessage(

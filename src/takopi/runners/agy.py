@@ -23,6 +23,7 @@ from ..runner import BaseRunner, ResumeTokenMixin, Runner
 from ..utils.paths import get_run_base_dir
 from ..utils.streams import iter_bytes_lines
 from ..utils.subprocess import manage_subprocess
+from .modes import run_modes
 from .run_options import get_run_options
 
 logger = get_logger(__name__)
@@ -104,6 +105,12 @@ class AgyRunner(ResumeTokenMixin, BaseRunner):
         resume: ResumeToken | None,
     ) -> list[str]:
         run_options = get_run_options()
+        plan, goal = run_modes(run_options)
+        # Goal is not a native agy mode — soft-prefix the condition into the prompt.
+        if goal is not None:
+            body = prompt.strip()
+            note = f"(autonomous goal — work until: {goal})"
+            prompt = f"{note}\n\n{body}" if body else note
         args: list[str] = [*self.extra_args]
 
         model = self.model
@@ -112,13 +119,17 @@ class AgyRunner(ResumeTokenMixin, BaseRunner):
         if model is not None:
             args.extend(["--model", str(model)])
 
-        if self.mode is not None:
-            args.extend(["--mode", str(self.mode)])
+        mode = "plan" if plan else self.mode
+        if mode is not None:
+            args.extend(["--mode", str(mode)])
 
         if self.sandbox is True:
             args.append("--sandbox")
 
-        if self.yolo is True:
+        if plan:
+            # Plan mode must not auto-approve destructive tools.
+            pass
+        elif self.yolo is True:
             args.append("--dangerously-skip-permissions")
 
         if resume is not None:

@@ -13,6 +13,7 @@ class Presenter(Protocol):
         *,
         elapsed_s: float,
         label: str = "working",
+        steerable: bool = True,
     ) -> RenderedMessage: ...
 
     def render_final(

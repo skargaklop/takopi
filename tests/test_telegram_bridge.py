@@ -335,7 +335,8 @@ async def test_send_queued_progress_omits_steer_when_not_steerable() -> None:
         thread_id=None,
         resume_token=ResumeToken(engine=CODEX_ENGINE, value="sid"),
         context=None,
-        steerable=False,
+        is_queued=False,
+        turn_steerable=False,
     )
 
     assert transport.send_calls

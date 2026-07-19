@@ -77,6 +77,9 @@ def build_bot_commands(
         ("model", "set model override"),
         ("reasoning", "set reasoning override"),
         ("trigger", "set trigger mode"),
+        ("plan", "sticky plan mode on/off"),
+        ("goal", "help for goal mode"),
+        ("queue", "show thread job queue"),
     ]:
         if cmd in seen:
             continue

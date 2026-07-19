@@ -17,6 +17,7 @@ from ..logging import get_logger
 from ..model import EngineId, ResumeToken, TakopiEvent
 from ..runner import JsonlSubprocessRunner, ResumeTokenMixin, Runner
 from ..schemas import grok as grok_schema
+from .modes import effective_prompt, run_modes
 from .run_options import get_run_options
 
 logger = get_logger(__name__)
@@ -185,11 +186,15 @@ class GrokRunner(ResumeTokenMixin, JsonlSubprocessRunner):
         state: GrokStreamState,
     ) -> list[str]:
         run_options = get_run_options()
+        plan, _goal = run_modes(run_options)
+        prompt = effective_prompt(prompt, soft_plan=False, options=run_options)
         args: list[str] = [*self.extra_args]
         args.extend(["-p", prompt])
         args.extend(["--output-format", "streaming-json"])
 
-        if self.yolo is True:
+        if plan:
+            args.extend(["--permission-mode", "plan"])
+        elif self.yolo is True:
             args.append("--yolo")
 
         model = self.model

@@ -42,6 +42,7 @@ class _ThreadState(msgspec.Struct, forbid_unknown_fields=False):
     topic_title: str | None = None
     default_engine: str | None = None
     trigger_mode: str | None = None
+    plan_mode: bool | None = None
     engine_overrides: dict[str, EngineOverrides] = msgspec.field(default_factory=dict)
 
 
@@ -229,6 +230,26 @@ class TopicStateStore(JsonStateStore[_TopicState]):
 
     async def clear_trigger_mode(self, chat_id: int, thread_id: int) -> None:
         await self.set_trigger_mode(chat_id, thread_id, None)
+
+    async def get_plan_mode(self, chat_id: int, thread_id: int) -> bool | None:
+        async with self._lock:
+            self._reload_locked_if_needed()
+            thread = self._get_thread_locked(chat_id, thread_id)
+            if thread is None:
+                return None
+            return thread.plan_mode
+
+    async def set_plan_mode(
+        self, chat_id: int, thread_id: int, enabled: bool | None
+    ) -> None:
+        async with self._lock:
+            self._reload_locked_if_needed()
+            thread = self._ensure_thread_locked(chat_id, thread_id)
+            thread.plan_mode = None if enabled is None else bool(enabled)
+            self._save_locked()
+
+    async def clear_plan_mode(self, chat_id: int, thread_id: int) -> None:
+        await self.set_plan_mode(chat_id, thread_id, None)
 
     async def set_engine_override(
         self,

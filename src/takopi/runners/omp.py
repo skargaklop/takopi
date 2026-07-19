@@ -10,6 +10,7 @@ from ..backends import EngineBackend, EngineConfig
 from ..config import ConfigError
 from ..model import ActionEvent, CompletedEvent, EngineId, ResumeToken, StartedEvent, TakopiEvent
 from ..runner import Runner
+from .modes import effective_prompt, run_modes
 from .pi import PiRunner, PiStreamState, pi_schema
 from .run_options import get_run_options
 
@@ -63,6 +64,24 @@ class OmpRunner(PiRunner):
     session_title: str = "omp"
     resume_re: re.Pattern[str] = _RESUME_RE
 
+    def __init__(
+        self,
+        *,
+        extra_args: list[str],
+        model: str | None,
+        provider: str | None,
+        plan_mode: str = "soft",
+        plan_flag: bool = False,
+    ) -> None:
+        super().__init__(
+            extra_args=extra_args,
+            model=model,
+            provider=provider,
+            plan_flag=plan_flag,
+        )
+        # off | soft | yolo
+        self.plan_mode = (plan_mode or "soft").strip().lower()
+
     def format_resume(self, token: ResumeToken) -> str:
         if token.engine != ENGINE:
             raise RuntimeError(f"resume token is for engine {token.engine!r}")
@@ -94,6 +113,13 @@ class OmpRunner(PiRunner):
         state: PiStreamState,
     ) -> list[str]:
         run_options = get_run_options()
+        plan, goal = run_modes(run_options)
+        if goal is not None:
+            body = prompt.strip()
+            note = f"(autonomous goal — work until: {goal})"
+            prompt = f"{note}\n\n{body}" if body else note
+        elif plan and self.plan_mode == "soft":
+            prompt = effective_prompt(prompt, soft_plan=True, options=run_options)
         args: list[str] = [*self.extra_args, "--print", "--mode", "json"]
         if self.provider:
             args.extend(["--provider", self.provider])
@@ -104,6 +130,8 @@ class OmpRunner(PiRunner):
             args.extend(["--model", model])
         if run_options is not None and run_options.reasoning:
             args.extend(["--thinking", str(run_options.reasoning)])
+        if plan and self.plan_mode == "yolo":
+            args.append("--plan-yolo")
         if resume is not None:
             args.extend(["--resume", resume.value])
         if run_options is not None:
@@ -210,10 +238,23 @@ def build_runner(config: EngineConfig, config_path: Path) -> Runner:
     if provider is not None and not isinstance(provider, str):
         raise ConfigError(f"Invalid `omp.provider` in {config_path}; expected a string.")
 
+    plan_mode = config.get("plan_mode", "soft")
+    if plan_mode is not None and not isinstance(plan_mode, str):
+        raise ConfigError(
+            f"Invalid `omp.plan_mode` in {config_path}; expected a string "
+            "(`off`, `soft`, or `yolo`)."
+        )
+    plan_mode_s = str(plan_mode or "soft").strip().lower()
+    if plan_mode_s not in {"off", "soft", "yolo"}:
+        raise ConfigError(
+            f"Invalid `omp.plan_mode` in {config_path}; expected `off`, `soft`, or `yolo`."
+        )
+
     return OmpRunner(
         extra_args=extra_args,
         model=model,
         provider=provider,
+        plan_mode=plan_mode_s,
     )
 
 

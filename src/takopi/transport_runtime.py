@@ -35,6 +35,8 @@ class ResolvedMessage:
     engine_override: EngineId | None
     context: RunContext | None
     context_source: ContextSource = "none"
+    plan: bool = False
+    goal: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -212,6 +214,8 @@ class TransportRuntime:
             engine_override=engine_override,
             context=context,
             context_source=context_source,
+            plan=bool(directives.plan),
+            goal=directives.goal,
         )
 
     def project_default_engine(self, context: RunContext | None) -> EngineId | None:

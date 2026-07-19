@@ -14,6 +14,7 @@ from ..events import EventFactory
 from ..logging import get_logger
 from ..model import Action, ActionKind, EngineId, ResumeToken, TakopiEvent
 from ..runner import JsonlSubprocessRunner, ResumeTokenMixin, Runner
+from .modes import effective_prompt, run_modes
 from .run_options import get_run_options
 from ..schemas import claude as claude_schema
 from .tool_actions import tool_input_path, tool_kind_and_title
@@ -304,6 +305,8 @@ class ClaudeRunner(ResumeTokenMixin, JsonlSubprocessRunner):
 
     def _build_args(self, prompt: str, resume: ResumeToken | None) -> list[str]:
         run_options = get_run_options()
+        plan, goal = run_modes(run_options)
+        prompt = effective_prompt(prompt, soft_plan=False, options=run_options)
         args: list[str] = ["-p", "--output-format", "stream-json", "--verbose"]
         if resume is not None:
             args.extend(["--resume", resume.value])
@@ -315,7 +318,10 @@ class ClaudeRunner(ResumeTokenMixin, JsonlSubprocessRunner):
         allowed_tools = _coerce_comma_list(self.allowed_tools)
         if allowed_tools is not None:
             args.extend(["--allowedTools", allowed_tools])
-        if self.dangerously_skip_permissions is True:
+        if plan:
+            args.extend(["--permission-mode", "plan"])
+        elif self.dangerously_skip_permissions is True:
+            # Goal (and normal runs) keep yolo so unattended loops can work.
             args.append("--dangerously-skip-permissions")
         if run_options is not None and run_options.reasoning:
             args.extend(["--effort", str(run_options.reasoning)])

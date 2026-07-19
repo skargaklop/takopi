@@ -6,6 +6,11 @@ from .config import ProjectsConfig
 from .context import RunContext
 from .model import EngineId
 
+# Mode tokens reserved ahead of project aliases (e.g. a project named "plan").
+_MODE_PLAN = "plan"
+_MODE_GOAL = "goal"
+_RESERVED_MODE_TOKENS = frozenset({_MODE_PLAN, _MODE_GOAL})
+
 
 @dataclass(frozen=True, slots=True)
 class ParsedDirectives:
@@ -13,6 +18,8 @@ class ParsedDirectives:
     engine: EngineId | None
     project: str | None
     branch: str | None
+    plan: bool = False
+    goal: str | None = None
 
 
 class DirectiveError(RuntimeError):
@@ -26,17 +33,23 @@ def parse_directives(
     projects: ProjectsConfig,
 ) -> ParsedDirectives:
     if not text:
-        return ParsedDirectives(prompt="", engine=None, project=None, branch=None)
+        return ParsedDirectives(
+            prompt="", engine=None, project=None, branch=None, plan=False, goal=None
+        )
 
     lines = text.splitlines()
     idx = next((i for i, line in enumerate(lines) if line.strip()), None)
     if idx is None:
-        return ParsedDirectives(prompt=text, engine=None, project=None, branch=None)
+        return ParsedDirectives(
+            prompt=text, engine=None, project=None, branch=None, plan=False, goal=None
+        )
 
     line = lines[idx].lstrip()
     tokens = line.split()
     if not tokens:
-        return ParsedDirectives(prompt=text, engine=None, project=None, branch=None)
+        return ParsedDirectives(
+            prompt=text, engine=None, project=None, branch=None, plan=False, goal=None
+        )
 
     engine_map = {engine.lower(): engine for engine in engine_ids}
     project_map = {alias.lower(): alias for alias in projects.projects}
@@ -44,9 +57,14 @@ def parse_directives(
     engine: EngineId | None = None
     project: str | None = None
     branch: str | None = None
+    plan = False
+    goal: str | None = None
     consumed = 0
+    goal_started = False
 
     for token in tokens:
+        if goal_started:
+            break
         if token.startswith("/"):
             name = token[1:]
             if "@" in name:
@@ -54,6 +72,29 @@ def parse_directives(
             if not name:
                 break
             key = name.lower()
+            if key == _MODE_PLAN:
+                plan = True
+                consumed += 1
+                continue
+            if key == _MODE_GOAL:
+                # Remainder of the message is the goal condition.
+                rest_on_line = tokens[consumed + 1 :]
+                rest_lines = lines[idx + 1 :]
+                parts: list[str] = []
+                if rest_on_line:
+                    parts.append(" ".join(rest_on_line))
+                if rest_lines:
+                    parts.append("\n".join(rest_lines))
+                goal = "\n".join(parts).strip() or None
+                # Consume entire message as directives-only (prompt empty).
+                return ParsedDirectives(
+                    prompt="",
+                    engine=engine,
+                    project=project,
+                    branch=branch,
+                    plan=plan and goal is None,  # goal wins over plan
+                    goal=goal,
+                )
             engine_candidate = engine_map.get(key)
             project_candidate = project_map.get(key)
             if engine_candidate is not None:
@@ -62,7 +103,7 @@ def parse_directives(
                 engine = engine_candidate
                 consumed += 1
                 continue
-            if project_candidate is not None:
+            if project_candidate is not None and key not in _RESERVED_MODE_TOKENS:
                 if project is not None:
                     raise DirectiveError("multiple project directives")
                 project = project_candidate
@@ -80,8 +121,10 @@ def parse_directives(
             continue
         break
 
-    if consumed == 0:
-        return ParsedDirectives(prompt=text, engine=None, project=None, branch=None)
+    if consumed == 0 and not plan and goal is None:
+        return ParsedDirectives(
+            prompt=text, engine=None, project=None, branch=None, plan=False, goal=None
+        )
 
     if consumed < len(tokens):
         remainder = " ".join(tokens[consumed:])
@@ -90,8 +133,16 @@ def parse_directives(
         lines.pop(idx)
 
     prompt = "\n".join(lines).strip()
+    # Goal already handled via early return; plan alone leaves remaining prompt.
+    if goal is not None:
+        plan = False
     return ParsedDirectives(
-        prompt=prompt, engine=engine, project=project, branch=branch
+        prompt=prompt,
+        engine=engine,
+        project=project,
+        branch=branch,
+        plan=plan,
+        goal=goal,
     )
 
 

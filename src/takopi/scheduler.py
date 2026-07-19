@@ -25,6 +25,8 @@ class ThreadJob:
     thread_id: ThreadId | None = None
     session_key: tuple[int, int | None] | None = None
     progress_ref: MessageRef | None = None
+    plan: bool = False
+    goal: str | None = None
 
 
 RunJob = Callable[[ThreadJob], Awaitable[None]]
@@ -84,6 +86,8 @@ class ThreadScheduler:
         thread_id: ThreadId | None = None,
         session_key: tuple[int, int | None] | None = None,
         progress_ref: MessageRef | None = None,
+        plan: bool = False,
+        goal: str | None = None,
     ) -> None:
         await self.enqueue(
             ThreadJob(
@@ -95,8 +99,21 @@ class ThreadScheduler:
                 thread_id=thread_id,
                 session_key=session_key,
                 progress_ref=progress_ref,
+                plan=plan,
+                goal=goal,
             )
         )
+
+    async def list_queued_for_thread(self, token: ResumeToken) -> list[ThreadJob]:
+        key = self.thread_key(token)
+        async with self._lock:
+            queue = self._pending_by_thread.get(key)
+            if not queue:
+                return []
+            return list(queue)
+
+    async def queue_depth(self, token: ResumeToken) -> int:
+        return len(await self.list_queued_for_thread(token))
 
     async def cancel_queued(
         self, chat_id: ChannelId, progress_msg_id: MessageId

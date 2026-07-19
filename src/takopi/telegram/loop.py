@@ -52,9 +52,12 @@ from .commands.handlers import (
     handle_ctx_command,
     handle_file_command,
     handle_file_put_default,
+    handle_goal_command,
     handle_media_group,
     handle_model_command,
     handle_new_command,
+    handle_plan_command,
+    handle_queue_command,
     handle_reasoning_command,
     handle_topic_command,
     handle_trigger_command,
@@ -154,12 +157,32 @@ def _callback_message(update: TelegramCallbackQuery) -> TelegramIncomingMessage:
     )
 
 
+async def _resolve_sticky_plan(
+    chat_id: int,
+    thread_id: int | None,
+    chat_prefs: ChatPrefsStore | None,
+    topic_store: TopicStateStore | None,
+) -> bool:
+    if topic_store is not None and thread_id is not None:
+        topic_plan = await topic_store.get_plan_mode(chat_id, thread_id)
+        if topic_plan is not None:
+            return bool(topic_plan)
+    if chat_prefs is not None:
+        chat_plan = await chat_prefs.get_plan_mode(chat_id)
+        if chat_plan is not None:
+            return bool(chat_plan)
+    return False
+
+
 async def _resolve_engine_run_options(
     chat_id: int,
     thread_id: int | None,
     engine: EngineId,
     chat_prefs: ChatPrefsStore | None,
     topic_store: TopicStateStore | None,
+    *,
+    plan: bool = False,
+    goal: str | None = None,
 ) -> EngineRunOptions | None:
     topic_override = None
     if topic_store is not None and thread_id is not None:
@@ -170,9 +193,20 @@ async def _resolve_engine_run_options(
     if chat_prefs is not None:
         chat_override = await chat_prefs.get_engine_override(chat_id, engine)
     merged = merge_overrides(topic_override, chat_override)
-    if merged is None:
+    sticky_plan = await _resolve_sticky_plan(
+        chat_id, thread_id, chat_prefs, topic_store
+    )
+    effective_plan = bool(plan) or sticky_plan
+    if goal:
+        effective_plan = False
+    if merged is None and not effective_plan and not goal:
         return None
-    return EngineRunOptions(model=merged.model, reasoning=merged.reasoning)
+    return EngineRunOptions(
+        model=merged.model if merged is not None else None,
+        reasoning=merged.reasoning if merged is not None else None,
+        plan=effective_plan,
+        goal=goal.strip() if goal else None,
+    )
 
 
 def _allowed_chat_ids(cfg: TelegramBridgeConfig) -> set[int]:
@@ -346,6 +380,53 @@ def _dispatch_builtin_command(
         task_group.start_soon(handler)
         return True
 
+    if command_id == "plan":
+        handler = partial(
+            handle_plan_command,
+            cfg,
+            msg,
+            args_text,
+            ambient_context,
+            topic_store,
+            chat_prefs,
+            resolved_scope=resolved_scope,
+            scope_chat_ids=scope_chat_ids,
+        )
+        task_group.start_soon(handler)
+        return True
+
+    if command_id == "goal":
+        handler = partial(
+            handle_goal_command,
+            cfg,
+            msg,
+            args_text,
+            ambient_context,
+            topic_store,
+            chat_prefs,
+            resolved_scope=resolved_scope,
+            scope_chat_ids=scope_chat_ids,
+        )
+        task_group.start_soon(handler)
+        return True
+
+    if command_id == "queue":
+        handler = partial(
+            handle_queue_command,
+            cfg,
+            msg,
+            args_text,
+            ambient_context,
+            topic_store,
+            chat_prefs,
+            resolved_scope=resolved_scope,
+            scope_chat_ids=scope_chat_ids,
+            scheduler=ctx.scheduler,
+            running_tasks=ctx.running_tasks,
+        )
+        task_group.start_soon(handler)
+        return True
+
     return False
 
 
@@ -443,6 +524,8 @@ class TelegramCommandContext:
     scope_chat_ids: frozenset[int]
     reply: Callable[..., Awaitable[None]]
     task_group: TaskGroup
+    scheduler: ThreadScheduler | None = None
+    running_tasks: Mapping[MessageRef, object] | None = None
 
 
 def _classify_message(
@@ -910,6 +993,18 @@ async def _wait_for_resume(running_task) -> ResumeToken | None:
     return resume
 
 
+def _thread_turn_steerable(
+    running_tasks: Mapping[MessageRef, object],
+    resume_token: ResumeToken,
+) -> bool:
+    for task in running_tasks.values():
+        control = getattr(task, "control", None)
+        resume = getattr(task, "resume", None)
+        if control is not None and resume == resume_token:
+            return True
+    return False
+
+
 async def _send_queued_progress(
     cfg: TelegramBridgeConfig,
     *,
@@ -918,7 +1013,8 @@ async def _send_queued_progress(
     thread_id: int | None,
     resume_token: ResumeToken,
     context: RunContext | None,
-    steerable: bool,
+    is_queued: bool,
+    turn_steerable: bool = False,
 ) -> MessageRef | None:
     tracker = ProgressTracker(engine=resume_token.engine)
     tracker.set_resume(resume_token)
@@ -940,7 +1036,8 @@ async def _send_queued_progress(
     message = cfg.exec_cfg.presenter.render_progress(
         state,
         elapsed_s=0.0,
-        label="queued" if steerable else "starting",
+        label="queued" if is_queued else "starting",
+        steerable=turn_steerable,
     )
     reply_ref = MessageRef(
         channel_id=chat_id,
@@ -997,7 +1094,8 @@ async def send_with_resume(
         thread_id=thread_id,
         resume_token=resume,
         context=running_task.context,
-        steerable=not running_task.done.is_set(),
+        is_queued=not running_task.done.is_set(),
+        turn_steerable=getattr(running_task, "control", None) is not None,
     )
     await enqueue(
         chat_id,
@@ -1218,6 +1316,8 @@ async def run_main_loop(
                 engine_override: EngineId | None = None,
                 progress_ref: MessageRef | None = None,
                 attachments: tuple[PromptAttachment, ...] = (),
+                plan: bool = False,
+                goal: str | None = None,
             ) -> None:
                 topic_key = (
                     (chat_id, thread_id)
@@ -1251,6 +1351,8 @@ async def run_main_loop(
                     engine_for_overrides,
                     chat_prefs=state.chat_prefs,
                     topic_store=state.topic_store,
+                    plan=plan,
+                    goal=goal,
                 )
                 if attachments:
                     run_options = merge_run_options(
@@ -1289,6 +1391,9 @@ async def run_main_loop(
                     scheduler.note_thread_known,
                     None,
                     job.progress_ref,
+                    (),
+                    job.plan,
+                    job.goal,
                 )
 
             scheduler = ThreadScheduler(task_group=tg, run_job=run_thread_job)
@@ -1437,6 +1542,8 @@ async def run_main_loop(
                 if resume_decision.handled_by_running_task:
                     return
                 resume_token = resume_decision.resume_token
+                plan = bool(resolved.plan)
+                goal = resolved.goal
                 if resume_token is None:
                     await run_job(
                         chat_id,
@@ -1451,8 +1558,11 @@ async def run_main_loop(
                         engine_override,
                         None,
                         attachments,
+                        plan,
+                        goal,
                     )
                     return
+                is_queued = await scheduler.is_busy(resume_token)
                 progress_ref = await _send_queued_progress(
                     cfg,
                     chat_id=chat_id,
@@ -1460,7 +1570,10 @@ async def run_main_loop(
                     thread_id=msg.thread_id,
                     resume_token=resume_token,
                     context=context,
-                    steerable=await scheduler.is_busy(resume_token),
+                    is_queued=is_queued,
+                    turn_steerable=_thread_turn_steerable(
+                        state.running_tasks, resume_token
+                    ),
                 )
                 await scheduler.enqueue_resume(
                     chat_id,
@@ -1471,6 +1584,8 @@ async def run_main_loop(
                     msg.thread_id,
                     chat_session_key,
                     progress_ref,
+                    plan,
+                    goal,
                 )
 
             async def run_prompt_from_upload(
@@ -1524,6 +1639,8 @@ async def run_main_loop(
                         engine_override=resolved.engine_override,
                         context=resolved.context,
                         context_source=resolved.context_source,
+                        plan=resolved.plan,
+                        goal=resolved.goal,
                     )
 
                 prompt_text = resolved.prompt
@@ -1758,6 +1875,8 @@ async def run_main_loop(
                         scope_chat_ids=state.topics_chat_ids,
                         reply=reply,
                         task_group=tg,
+                        scheduler=scheduler,
+                        running_tasks=state.running_tasks,
                     ),
                     command_id=command_id,
                 ):

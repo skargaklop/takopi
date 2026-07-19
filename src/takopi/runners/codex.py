@@ -20,6 +20,7 @@ from ..events import EventFactory
 from ..logging import get_logger
 from ..model import ActionPhase, EngineId, ResumeToken, TakopiEvent
 from ..runner import BaseRunner, JsonlSubprocessRunner, ResumeTokenMixin, Runner
+from .modes import effective_prompt, run_modes
 from .run_options import get_run_options
 from ..schemas import codex as codex_schema
 from ..utils.paths import get_run_base_dir, relativize_command
@@ -518,6 +519,22 @@ class CodexRunner(ResumeTokenMixin, JsonlSubprocessRunner):
 
     def new_state(self, prompt: str, resume: ResumeToken | None) -> CodexRunState:
         return CodexRunState(factory=EventFactory(ENGINE))
+
+    def stdin_payload(
+        self,
+        prompt: str,
+        resume: ResumeToken | None,
+        *,
+        state: Any,
+    ) -> bytes | None:
+        plan, goal = run_modes()
+        if goal is not None:
+            body = prompt.strip()
+            note = f"(autonomous goal — work until: {goal})"
+            prompt = f"{note}\n\n{body}" if body else note
+        elif plan:
+            prompt = effective_prompt(prompt, soft_plan=True)
+        return prompt.encode()
 
     def start_run(
         self,
@@ -1317,6 +1334,13 @@ class AppServerCodexRunner(ResumeTokenMixin, BaseRunner):
         await client.start()
 
         run_options = get_run_options()
+        plan, goal = run_modes(run_options)
+        if goal is not None:
+            body = prompt.strip()
+            note = f"(autonomous goal — work until: {goal})"
+            prompt = f"{note}\n\n{body}" if body else note
+        elif plan:
+            prompt = effective_prompt(prompt, soft_plan=True, options=run_options)
         if resume is not None:
             thread_id = resume.value
             await client.ensure_thread_loaded(thread_id)

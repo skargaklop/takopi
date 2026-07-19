@@ -27,6 +27,7 @@ from ..model import (
     TakopiEvent,
 )
 from ..runner import JsonlSubprocessRunner, ResumeTokenMixin, Runner
+from .modes import effective_prompt, run_modes
 from .run_options import get_run_options
 from ..schemas import pi as pi_schema
 from ..utils.paths import get_run_base_dir
@@ -288,10 +289,12 @@ class PiRunner(ResumeTokenMixin, JsonlSubprocessRunner):
         extra_args: list[str],
         model: str | None,
         provider: str | None,
+        plan_flag: bool = False,
     ) -> None:
         self.extra_args = extra_args
         self.model = model
         self.provider = provider
+        self.plan_flag = plan_flag
 
     def format_resume(self, token: ResumeToken) -> str:
         if token.engine != ENGINE:
@@ -352,6 +355,15 @@ class PiRunner(ResumeTokenMixin, JsonlSubprocessRunner):
         state: PiStreamState,
     ) -> list[str]:
         run_options = get_run_options()
+        plan, goal = run_modes(run_options)
+        if goal is not None:
+            body = prompt.strip()
+            note = f"(autonomous goal — work until: {goal})"
+            prompt = f"{note}\n\n{body}" if body else note
+        elif plan and self.plan_flag:
+            pass
+        elif plan:
+            prompt = effective_prompt(prompt, soft_plan=True, options=run_options)
         args: list[str] = [*self.extra_args, "--print", "--mode", "json"]
         if self.provider:
             args.extend(["--provider", self.provider])
@@ -362,6 +374,8 @@ class PiRunner(ResumeTokenMixin, JsonlSubprocessRunner):
             args.extend(["--model", model])
         if run_options is not None and run_options.reasoning:
             args.extend(["--thinking", str(run_options.reasoning)])
+        if plan and self.plan_flag:
+            args.append("--plan")
         session_value = self._resolve_session_path(state.resume.value)
         args.extend(["--session", session_value])
         # Layer B: pi accepts @file references in the initial message list.
@@ -546,10 +560,13 @@ def build_runner(config: EngineConfig, config_path: Path) -> Runner:
     if provider is not None and not isinstance(provider, str):
         raise ConfigError(f"Invalid `pi.provider` in {config_path}; expected a string.")
 
+    plan_flag = config.get("plan_flag") is True
+
     return PiRunner(
         extra_args=extra_args,
         model=model,
         provider=provider,
+        plan_flag=plan_flag,
     )
 
 

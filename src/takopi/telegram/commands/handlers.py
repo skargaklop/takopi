@@ -13,8 +13,11 @@ from .file_transfer import _save_file_put as save_file_put
 from .media import _handle_media_group as handle_media_group
 from .menu import _reserved_commands as get_reserved_commands
 from .menu import _set_command_menu as set_command_menu
+from .goal_cmd import _handle_goal_command as handle_goal_command
 from .model import _handle_model_command as handle_model_command
 from .parse import _parse_slash_command as parse_slash_command
+from .plan_cmd import _handle_plan_command as handle_plan_command
+from .queue_cmd import _handle_queue_command as handle_queue_command
 from .reasoning import _handle_reasoning_command as handle_reasoning_command
 from .topics import _handle_chat_new_command as handle_chat_new_command
 from .topics import _handle_chat_ctx_command as handle_chat_ctx_command
@@ -33,9 +36,12 @@ __all__ = [
     "handle_ctx_command",
     "handle_file_command",
     "handle_file_put_default",
+    "handle_goal_command",
     "handle_media_group",
     "handle_model_command",
     "handle_new_command",
+    "handle_plan_command",
+    "handle_queue_command",
     "handle_reasoning_command",
     "handle_topic_command",
     "handle_trigger_command",

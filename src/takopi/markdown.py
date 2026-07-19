@@ -279,7 +279,9 @@ class MarkdownPresenter:
         *,
         elapsed_s: float,
         label: str = "working",
+        steerable: bool = True,
     ) -> RenderedMessage:
+        del steerable  # TelegramPresenter uses this; plain markdown ignores it.
         parts = self._formatter.render_progress_parts(
             state, elapsed_s=elapsed_s, label=label
         )

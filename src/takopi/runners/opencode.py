@@ -34,6 +34,7 @@ from ..model import (
     TakopiEvent,
 )
 from ..runner import JsonlSubprocessRunner, ResumeTokenMixin, Runner
+from .modes import effective_prompt, run_modes
 from .run_options import get_run_options
 from ..schemas import opencode as opencode_schema
 from ..utils.paths import relativize_path
@@ -315,6 +316,7 @@ class OpenCodeRunner(ResumeTokenMixin, JsonlSubprocessRunner):
 
     opencode_cmd: str = "opencode"
     model: str | None = None
+    plan_agent: str | None = None
     session_title: str = "opencode"
     logger = logger
 
@@ -337,6 +339,15 @@ class OpenCodeRunner(ResumeTokenMixin, JsonlSubprocessRunner):
         state: Any,
     ) -> list[str]:
         run_options = get_run_options()
+        plan, goal = run_modes(run_options)
+        if goal is not None:
+            body = prompt.strip()
+            note = f"(autonomous goal — work until: {goal})"
+            prompt = f"{note}\n\n{body}" if body else note
+        elif plan and self.plan_agent:
+            pass
+        elif plan:
+            prompt = effective_prompt(prompt, soft_plan=True, options=run_options)
         args = ["run", "--format", "json"]
         if resume is not None:
             args.extend(["--session", resume.value])
@@ -345,6 +356,8 @@ class OpenCodeRunner(ResumeTokenMixin, JsonlSubprocessRunner):
             model = run_options.model
         if model is not None:
             args.extend(["--model", str(model)])
+        if plan and self.plan_agent:
+            args.extend(["--agent", str(self.plan_agent)])
         if _NUMERIC_PROMPT_RE.fullmatch(prompt):
             prompt = f"{prompt}."
         args.extend(["--", prompt])
@@ -500,9 +513,16 @@ def build_runner(config: EngineConfig, config_path: Path) -> Runner:
 
     title = str(model) if model is not None else "opencode"
 
+    plan_agent = config.get("plan_agent")
+    if plan_agent is not None and not isinstance(plan_agent, str):
+        raise ConfigError(
+            f"Invalid `opencode.plan_agent` in {config_path}; expected a string."
+        )
+
     return OpenCodeRunner(
         opencode_cmd=opencode_cmd,
         model=model,
+        plan_agent=plan_agent,
         session_title=title,
     )
 
