@@ -16,7 +16,10 @@ from .reply import make_reply
 if TYPE_CHECKING:
     from ..bridge import TelegramBridgeConfig
 
-AGENT_USAGE = "usage: `/agent`, `/agent set <engine>`, or `/agent clear`"
+AGENT_USAGE = (
+    "usage: `/agent`, `/agent set <engine>`, `/agent <engine>`, or `/agent clear`\n"
+    "to run a prompt, send it without `/agent` (or use `/claude …`, `/codex …`, …)"
+)
 
 
 async def _check_agent_permissions(
@@ -58,6 +61,11 @@ async def _handle_agent_command(
     )
     tokens = split_command_args(args_text)
     action = tokens[0].lower() if tokens else "show"
+    engine_ids = {engine.lower() for engine in cfg.runtime.engine_ids}
+    # Shorthand: `/agent claude` ≡ `/agent set claude`
+    if action not in {"show", "set", "clear", ""} and action in engine_ids:
+        tokens = ("set", action, *tokens[1:])
+        action = "set"
 
     if action in {"show", ""}:
         try:

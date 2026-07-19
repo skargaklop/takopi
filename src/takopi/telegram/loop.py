@@ -61,8 +61,6 @@ from .commands.handlers import (
     handle_reasoning_command,
     handle_topic_command,
     handle_trigger_command,
-    is_sticky_goal_args,
-    is_sticky_plan_args,
     parse_callback_data,
     parse_slash_command,
     get_reserved_commands,
@@ -71,6 +69,7 @@ from .commands.handlers import (
     set_command_menu,
     should_show_resume_line,
 )
+from .commands.meta_args import should_handle_as_meta_command
 from .commands.parse import is_cancel_command
 from .commands.reply import make_reply
 from .context import _merge_topic_context, _usage_ctx_set, _usage_topic
@@ -251,6 +250,13 @@ def _dispatch_builtin_command(
     scope_chat_ids = ctx.scope_chat_ids
     reply = ctx.reply
     task_group = ctx.task_group
+    # Dual-mode / free-form: let the main loop run the message as a prompt.
+    if not should_handle_as_meta_command(
+        command_id,
+        args_text,
+        engine_ids=cfg.runtime.engine_ids,
+    ):
+        return False
     if command_id == "file":
         if not cfg.files.enabled:
             handler = partial(
@@ -383,11 +389,7 @@ def _dispatch_builtin_command(
         return True
 
     if command_id == "plan":
-        # Sticky preference only: /plan, /plan on|off|clear|show
-        # Free-form (e.g. /plan /agy design …) falls through as a normal prompt
-        # so parse_directives can set plan mode and run the agent.
-        if not is_sticky_plan_args(args_text):
-            return False
+        # Free-form already returned False above (should_handle_as_meta_command).
         handler = partial(
             handle_plan_command,
             cfg,
@@ -403,9 +405,6 @@ def _dispatch_builtin_command(
         return True
 
     if command_id == "goal":
-        # Help-only when bare /goal; /goal <condition> falls through as a prompt.
-        if not is_sticky_goal_args(args_text):
-            return False
         handler = partial(
             handle_goal_command,
             cfg,

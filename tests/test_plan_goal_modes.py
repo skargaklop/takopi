@@ -51,6 +51,40 @@ def test_is_sticky_goal_args() -> None:
     assert is_sticky_goal_args("all tests pass") is False
 
 
+def test_meta_vs_freeform_dispatch_matrix() -> None:
+    """Audit: only plan/goal free-form fall through to agent runs."""
+    from takopi.telegram.commands.meta_args import should_handle_as_meta_command
+
+    engines = ("codex", "claude", "agy", "grok")
+
+    # Dual-mode: free-form → agent run (not meta)
+    assert should_handle_as_meta_command("plan", "/agy design", engine_ids=engines) is False
+    assert should_handle_as_meta_command("plan", "design auth", engine_ids=engines) is False
+    assert should_handle_as_meta_command("goal", "all tests pass", engine_ids=engines) is False
+    # Dual-mode sticky/help stays meta
+    assert should_handle_as_meta_command("plan", "", engine_ids=engines) is True
+    assert should_handle_as_meta_command("plan", "on", engine_ids=engines) is True
+    assert should_handle_as_meta_command("goal", "", engine_ids=engines) is True
+
+    # Pure meta: always handled (never agent-run fallthrough)
+    for cmd in (
+        "agent",
+        "model",
+        "reasoning",
+        "trigger",
+        "queue",
+        "cancel",
+        "file",
+        "new",
+        "ctx",
+        "topic",
+    ):
+        assert (
+            should_handle_as_meta_command(cmd, "random freeform", engine_ids=engines)
+            is True
+        ), cmd
+
+
 # --- directives ---
 
 

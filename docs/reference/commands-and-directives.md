@@ -80,6 +80,8 @@ Notes:
 - In topics, `/ctx` binds the topic context.
 - `/new` clears sessions but does **not** clear a bound context.
 - Sticky `/plan on` merges with per-message `/plan` for subsequent runs in that scope.
+- **Dual-mode commands:** `/plan` and `/goal` are both sticky/help bot commands **and** message directives. Free-form text after them starts an agent run (same as prefixing a normal prompt). Other slash commands (`/agent`, `/model`, `/reasoning`, `/trigger`, `/queue`, …) are meta-only and never fall through to a run.
+- **Shorthand sets:** `/agent claude`, `/model opus`, `/reasoning high` work without the `set` keyword (same as `/agent set claude`, etc.).
 
 ## CLI
 

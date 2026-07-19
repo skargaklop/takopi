@@ -28,8 +28,9 @@ if TYPE_CHECKING:
     from ..bridge import TelegramBridgeConfig
 
 REASONING_USAGE = (
-    "usage: `/reasoning`, `/reasoning set <level>`, "
-    "`/reasoning set <engine> <level>`, or `/reasoning clear [engine]`"
+    "usage: `/reasoning`, `/reasoning set <level>`, `/reasoning <level>`, "
+    "`/reasoning set <engine> <level>`, `/reasoning <engine> <level>`, "
+    "or `/reasoning clear [engine]`"
 )
 
 
@@ -53,6 +54,10 @@ async def _handle_reasoning_command(
     tokens = split_command_args(args_text)
     action = tokens[0].lower() if tokens else "show"
     engine_ids = {engine.lower() for engine in cfg.runtime.engine_ids}
+    # Shorthand: `/reasoning high` or `/reasoning claude xhigh` ≡ `/reasoning set …`
+    if action not in {"show", "set", "clear", ""}:
+        tokens = ("set", *tokens)
+        action = "set"
 
     if action in {"show", ""}:
         selection = await resolve_engine_selection(

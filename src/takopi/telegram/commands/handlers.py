@@ -14,11 +14,12 @@ from .media import _handle_media_group as handle_media_group
 from .menu import _reserved_commands as get_reserved_commands
 from .menu import _set_command_menu as set_command_menu
 from .goal_cmd import _handle_goal_command as handle_goal_command
-from .goal_cmd import is_sticky_goal_args
+from .meta_args import is_agent_meta_args, should_handle_as_meta_command
 from .model import _handle_model_command as handle_model_command
 from .parse import _parse_slash_command as parse_slash_command
 from .plan_cmd import _handle_plan_command as handle_plan_command
 from .plan_cmd import is_sticky_plan_args
+from .goal_cmd import is_sticky_goal_args
 from .queue_cmd import _handle_queue_command as handle_queue_command
 from .reasoning import _handle_reasoning_command as handle_reasoning_command
 from .topics import _handle_chat_new_command as handle_chat_new_command
@@ -47,9 +48,11 @@ __all__ = [
     "handle_reasoning_command",
     "handle_topic_command",
     "handle_trigger_command",
+    "is_agent_meta_args",
     "is_sticky_goal_args",
     "is_sticky_plan_args",
     "parse_slash_command",
+    "should_handle_as_meta_command",
     "run_engine",
     "save_file_put",
     "set_command_menu",

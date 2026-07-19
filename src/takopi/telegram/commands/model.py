@@ -23,8 +23,9 @@ if TYPE_CHECKING:
     from ..bridge import TelegramBridgeConfig
 
 MODEL_USAGE = (
-    "usage: `/model`, `/model set <model>`, "
-    "`/model set <engine> <model>`, or `/model clear [engine]`"
+    "usage: `/model`, `/model set <model>`, `/model <model>`, "
+    "`/model set <engine> <model>`, `/model <engine> <model>`, "
+    "or `/model clear [engine]`"
 )
 
 
@@ -48,6 +49,10 @@ async def _handle_model_command(
     tokens = split_command_args(args_text)
     action = tokens[0].lower() if tokens else "show"
     engine_ids = {engine.lower() for engine in cfg.runtime.engine_ids}
+    # Shorthand: `/model opus` or `/model claude opus` ≡ `/model set …`
+    if action not in {"show", "set", "clear", ""}:
+        tokens = ("set", *tokens)
+        action = "set"
 
     if action in {"show", ""}:
         selection = await resolve_engine_selection(
