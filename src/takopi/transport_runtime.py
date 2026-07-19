@@ -15,6 +15,12 @@ from .directives import (
 )
 from .model import EngineId, ResumeToken
 from .plugins import normalize_allowlist
+from .resume_parse import (
+    parse_bare_resume,
+    parse_engine_resume_alias,
+    strip_engine_resume_prefix,
+    strip_resume_lines,
+)
 from .router import AutoRouter, EngineStatus
 from .runner import Runner
 from .worktrees import WorktreeError, resolve_run_cwd
@@ -37,6 +43,12 @@ class ResolvedMessage:
     context_source: ContextSource = "none"
     plan: bool = False
     goal: str | None = None
+    # Explicit resume from the user-sent text only (highest priority source).
+    user_resume: ResumeToken | None = None
+    # Bare `resume <id>` when engine not yet known (bind with sticky engine later).
+    bare_resume_id: str | None = None
+    # Resume line extracted only from the replied-to message footer.
+    reply_resume: ResumeToken | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -188,13 +200,20 @@ class TransportRuntime:
             projects=self._projects,
         )
         reply_ctx = parse_context_line(reply_text, projects=self._projects)
-        resume_token = self._router.resolve_resume(directives.prompt, reply_text)
-        # If directives stripped the engine prefix (e.g. "/codex resume abc") the
-        # stripped prompt ("resume abc") won't match any engine regex. Reconstruct
-        # the original line to try again with the known engine.
-        if resume_token is None and directives.engine is not None:
-            reconstructed = f"{directives.engine} {directives.prompt}"
-            resume_token = self._router.resolve_resume(reconstructed, None)
+        prompt = directives.prompt
+        engine_override = self._resolve_engine_override(
+            directives_engine=directives.engine,
+        )
+
+        user_resume, bare_resume_id, prompt = self._extract_user_resume(
+            prompt=prompt,
+            directives_engine=directives.engine,
+        )
+        reply_resume = self._router.extract_resume(reply_text)
+
+        # Compat: prefer user-explicit resume over reply footer.
+        resume_token = user_resume if user_resume is not None else reply_resume
+
         chat_project = self._projects.project_for_chat(chat_id)
         default_project = chat_project or self._projects.default_project
 
@@ -204,19 +223,93 @@ class TransportRuntime:
             ambient_context=ambient_context,
             default_project=default_project,
         )
-        engine_override = self._resolve_engine_override(
-            directives_engine=directives.engine,
-        )
 
         return ResolvedMessage(
-            prompt=directives.prompt,
+            prompt=prompt,
             resume_token=resume_token,
             engine_override=engine_override,
             context=context,
             context_source=context_source,
             plan=bool(directives.plan),
             goal=directives.goal,
+            user_resume=user_resume,
+            bare_resume_id=bare_resume_id,
+            reply_resume=reply_resume,
         )
+
+    def _extract_user_resume(
+        self,
+        *,
+        prompt: str,
+        directives_engine: EngineId | None,
+    ) -> tuple[ResumeToken | None, str | None, str]:
+        """Extract explicit resume from user prompt only; strip it from the prompt."""
+        # 1) Engine-native extract on stripped prompt (e.g. "codex resume id …")
+        user_resume = self._router.extract_resume(prompt)
+        if user_resume is not None:
+            entry = self._router.entry_for(user_resume)
+            cleaned = strip_resume_lines(
+                prompt, is_resume_line=entry.runner.is_resume_line
+            )
+            if cleaned == prompt:
+                cleaned = strip_engine_resume_prefix(
+                    prompt, engine=user_resume.engine
+                )
+            return user_resume, None, cleaned
+
+        # 2) Reconstruct after directive strip: "/claude resume id" → "claude resume id"
+        if directives_engine is not None:
+            reconstructed = f"{directives_engine} {prompt}"
+            user_resume = self._router.extract_resume(reconstructed)
+            if user_resume is not None:
+                entry = self._router.entry_for(user_resume)
+                cleaned = strip_resume_lines(
+                    reconstructed, is_resume_line=entry.runner.is_resume_line
+                )
+                # Prefer rest after stripping the reconstructed line; fall back to
+                # stripping bare/alias prefix from original prompt.
+                if cleaned == reconstructed or cleaned.startswith(
+                    str(directives_engine)
+                ):
+                    cleaned = strip_engine_resume_prefix(
+                        prompt, engine=user_resume.engine
+                    )
+                return user_resume, None, cleaned
+
+        # 3) Universal `{engine} resume <id>` alias (covers engines whose native
+        #    form is not `resume`, e.g. before regex updates).
+        alias = parse_engine_resume_alias(prompt)
+        if alias is not None:
+            eng, token = alias
+            known = {e.lower() for e in self._router.engine_ids}
+            if eng in known:
+                cleaned = strip_engine_resume_prefix(prompt, engine=eng)
+                return ResumeToken(engine=eng, value=token), None, cleaned
+        if directives_engine is not None:
+            alias = parse_engine_resume_alias(f"{directives_engine} {prompt}")
+            if alias is not None:
+                eng, token = alias
+                known = {e.lower() for e in self._router.engine_ids}
+                if eng in known:
+                    cleaned = strip_engine_resume_prefix(
+                        prompt, engine=eng
+                    )
+                    return ResumeToken(engine=eng, value=token), None, cleaned
+
+        # 4) Bare `resume <id> [rest]` — highest-priority user intent; engine may
+        #    still need sticky/default binding in ResumeResolver.
+        bare = parse_bare_resume(prompt)
+        if bare is not None:
+            token, rest = bare
+            if directives_engine is not None:
+                return (
+                    ResumeToken(engine=directives_engine, value=token),
+                    None,
+                    rest,
+                )
+            return None, token, rest
+
+        return None, None, prompt
 
     def project_default_engine(self, context: RunContext | None) -> EngineId | None:
         if context is None or context.project is None:

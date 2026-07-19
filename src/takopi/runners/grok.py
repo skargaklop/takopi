@@ -25,10 +25,10 @@ logger = get_logger(__name__)
 ENGINE: EngineId = "grok"
 
 _RESUME_RE = re.compile(
-    r"(?im)^\s*`?grok\s+(?:--resume|-r)\s+(?P<token>[^`\s]+)`?(?:\s|$)"
+    r"(?im)^\s*`?grok\s+(?:resume|--resume|-r)\s+(?P<token>[^`\s]+)`?(?:\s|$)"
 )
 _RESUME_LINE_RE = re.compile(
-    r"(?im)^\s*`?grok\s+(?:--resume|-r)\s+(?P<token>[^`\s]+)`?\s*$"
+    r"(?im)^\s*`?grok\s+(?:resume|--resume|-r)\s+(?P<token>[^`\s]+)`?\s*$"
 )
 
 

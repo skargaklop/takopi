@@ -75,13 +75,16 @@ Constraints:
 
 ### 3.4 Bridge resume resolution (MUST)
 
-Given `text` (user message), optional `reply_text` (the message being replied to), and an ordered list of available runners `runners`:
+Given `text` (user message), optional `reply_text` (the message being replied to), optional reply-to running task, and stored sessions:
 
-1. The bridge MUST attempt to extract a resume token by polling all runners in order:
-   1. for each `r` in `runners`, attempt `r.extract_resume(text)`
-   2. choose the **first** runner that returns a non-`None` token and stop
-2. If not found, it MUST repeat step (1) for `reply_text` if present.
-3. If still not found, the run MUST start with `resume=None` (new thread) on the default runner (per §8, including chat-level overrides).
+1. The bridge MUST extract an **explicit user resume** from the user message only (after directive strip), including:
+   - per-runner `extract_resume` on the user text (and reconstructed `/{engine} …` forms)
+   - the universal bare form `resume|--resume|--session|-r|-s <id>` (alias for **all** engines)
+2. If an explicit user resume is present, the bridge MUST use it and MUST NOT override it with reply footer, running-task attachment, topic store, or chat store.
+3. Else if the user replied to an active running progress message, the bridge MAY attach to that run's session.
+4. Else the bridge MUST attempt `extract_resume(reply_text)` when `reply_text` is present.
+5. Else the bridge MAY use topic-scoped then chat-scoped stored sessions for the resolved engine.
+6. If still not found, the run MUST start with `resume=None` (new thread) on the default runner (per §8, including chat-level overrides).
 
 ## 4. Normalized event model
 

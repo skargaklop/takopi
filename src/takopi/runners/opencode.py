@@ -45,10 +45,12 @@ logger = get_logger(__name__)
 ENGINE: EngineId = "opencode"
 
 _RESUME_RE = re.compile(
-    r"(?im)^\s*`?opencode(?:\s+run)?\s+(?:--session|-s)\s+(?P<token>ses_[A-Za-z0-9]+)`?(?:\s|$)"
+    r"(?im)^\s*`?opencode(?:\s+run)?\s+(?:resume|--resume|--session|-s|-r)\s+"
+    r"(?P<token>ses_[A-Za-z0-9]+)`?(?:\s|$)"
 )
 _RESUME_LINE_RE = re.compile(
-    r"(?im)^\s*`?opencode(?:\s+run)?\s+(?:--session|-s)\s+(?P<token>ses_[A-Za-z0-9]+)`?\s*$"
+    r"(?im)^\s*`?opencode(?:\s+run)?\s+(?:resume|--resume|--session|-s|-r)\s+"
+    r"(?P<token>ses_[A-Za-z0-9]+)`?\s*$"
 )
 _NUMERIC_PROMPT_RE = re.compile(r"^[0-9]+$")
 

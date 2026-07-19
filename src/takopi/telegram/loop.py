@@ -838,11 +838,35 @@ class ResumeResolver:
         topic_key: tuple[int, int] | None,
         engine_for_session: EngineId,
         prompt_text: str,
+        user_resume: ResumeToken | None = None,
+        bare_resume_id: str | None = None,
+        reply_resume: ResumeToken | None = None,
     ) -> ResumeDecision:
-        if resume_token is not None:
+        # Priority 1: explicit resume in the user-sent message (always wins).
+        if user_resume is not None:
+            return ResumeDecision(
+                resume_token=user_resume, handled_by_running_task=False
+            )
+        if bare_resume_id is not None:
+            return ResumeDecision(
+                resume_token=ResumeToken(
+                    engine=engine_for_session, value=bare_resume_id
+                ),
+                handled_by_running_task=False,
+            )
+        # Compat: callers that only pass resume_token treat it as user-explicit
+        # only when no split fields were provided; prefer reply_resume path below.
+        if (
+            user_resume is None
+            and bare_resume_id is None
+            and reply_resume is None
+            and resume_token is not None
+        ):
             return ResumeDecision(
                 resume_token=resume_token, handled_by_running_task=False
             )
+
+        # Priority 2: reply to an active running progress message.
         if reply_id is not None:
             running_task = self._running_tasks.get(
                 MessageRef(channel_id=chat_id, message_id=reply_id)
@@ -860,6 +884,15 @@ class ResumeResolver:
                     prompt_text,
                 )
                 return ResumeDecision(resume_token=None, handled_by_running_task=True)
+
+        # Priority 3: resume line in the replied-to message footer.
+        if reply_resume is not None:
+            return ResumeDecision(
+                resume_token=reply_resume, handled_by_running_task=False
+            )
+
+        # Priority 4–5: topic / chat stored sessions.
+        stored_token: ResumeToken | None = None
         if self._topic_store is not None and topic_key is not None:
             stored = await self._topic_store.get_session_resume(
                 topic_key[0],
@@ -867,9 +900,9 @@ class ResumeResolver:
                 engine_for_session,
             )
             if stored is not None:
-                resume_token = stored
+                stored_token = stored
         if (
-            resume_token is None
+            stored_token is None
             and self._chat_session_store is not None
             and chat_session_key is not None
         ):
@@ -879,8 +912,10 @@ class ResumeResolver:
                 engine_for_session,
             )
             if stored is not None:
-                resume_token = stored
-        return ResumeDecision(resume_token=resume_token, handled_by_running_task=False)
+                stored_token = stored
+        return ResumeDecision(
+            resume_token=stored_token, handled_by_running_task=False
+        )
 
 
 class MediaGroupBuffer:
@@ -1537,6 +1572,11 @@ async def run_main_loop(
                     topic_key=topic_key,
                 )
                 engine_override = engine_resolution.engine
+                # Explicit user resume forces its engine for store lookups / routing.
+                engine_for_session = engine_resolution.engine
+                if resolved.user_resume is not None:
+                    engine_for_session = resolved.user_resume.engine
+                    engine_override = resolved.user_resume.engine
                 resume_decision = await resume_resolver.resolve(
                     resume_token=resolved.resume_token,
                     reply_id=reply_id,
@@ -1545,8 +1585,11 @@ async def run_main_loop(
                     thread_id=msg.thread_id,
                     chat_session_key=chat_session_key,
                     topic_key=topic_key,
-                    engine_for_session=engine_resolution.engine,
+                    engine_for_session=engine_for_session,
                     prompt_text=prompt_text,
+                    user_resume=resolved.user_resume,
+                    bare_resume_id=resolved.bare_resume_id,
+                    reply_resume=resolved.reply_resume,
                 )
                 if resume_decision.handled_by_running_task:
                     return
@@ -1650,6 +1693,9 @@ async def run_main_loop(
                         context_source=resolved.context_source,
                         plan=resolved.plan,
                         goal=resolved.goal,
+                        user_resume=resolved.user_resume,
+                        bare_resume_id=resolved.bare_resume_id,
+                        reply_resume=resolved.reply_resume,
                     )
 
                 prompt_text = resolved.prompt

@@ -4,24 +4,20 @@ Takopi supports both **stateless** and **chat** modes for session handling. In s
 
 ## Continuation (how threads persist)
 
-Takopi supports three ways to continue a thread:
+Takopi continues threads using this **priority order** (highest first):
 
-1. **Reply-to-continue** (always available)
-   - Reply to any bot message that contains a resume line in the footer.
-   - Takopi extracts the resume token and resumes that engine thread.
-   - Reply resume lines always take precedence over chat sessions or topic storage.
-   - The resumed run updates the stored session for that engine when the token is known.
-2. **Forum topics** (optional)
-   - Topics can store resume tokens per topic and auto-resume new messages in that topic.
-   - Topic state is stored in `telegram_topics_state.json`.
-   - Reset with `/new`.
-3. **Chat sessions** (optional)
-   - Set `session_mode = "chat"` to store one resume token per chat (per sender in groups).
-   - Stored sessions are per engine; resuming a different engine does not overwrite others.
-   - State is stored in `telegram_chat_sessions_state.json`.
-   - Reset with `/new`.
+1. **Explicit resume in the user message** (always wins)
+   - Engine resume line: `codex resume <id>`, `` `claude --resume <id>` ``, `agy --conversation <id>`, …
+   - Universal alias (all engines, including Antigravity/`agy`): `resume <id>`, `--resume <id>`, `-r <id>`, …
+   - With engine directive: `/claude resume <id> …`, `/agy resume <id> …`
+   - Beats reply footer, reply-to-running, topic store, and chat store.
+2. **Reply to an active running progress message** (queue / wait for that thread).
+3. **Reply-to-continue** via resume line in the replied-to bot message footer.
+4. **Forum topics** (optional) — per-topic stored session (`telegram_topics_state.json`). Reset with `/new`.
+5. **Chat sessions** (optional) — `session_mode = "chat"` (`telegram_chat_sessions_state.json`). Reset with `/new`.
+6. **New session** when nothing above applies.
 
-Reply-to-continue works even if topics or chat sessions are enabled.
+Reply-to-continue and auto-resume still work when the user does **not** type an explicit resume.
 
 ## Routing (how Takopi picks a runner)
 

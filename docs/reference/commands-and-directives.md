@@ -13,7 +13,15 @@ Takopi parses the first non-empty line of a message for a directive prefix.
 | `@branch` | `@feat/happy-camera rewind to checkpoint` | Run in a worktree for the branch. |
 | `/plan` | `/plan /claude design auth` | Enable **agent plan mode** for this run (read-only / plan-first where the CLI supports it). |
 | `/goal …` | `/goal all tests pass` | Enable **goal mode** (autonomous loop until condition). Rest of message is the condition. |
+| `resume <id>` | `resume abc123 continue` | **Explicit session resume** (universal alias for all engines, including `agy`). Highest priority over reply/auto-session. |
 | Combined | `/happy-gadgets @feat/flower-pin observe unseen` | Project + branch. |
+
+Resume examples (user-typed resume always wins):
+
+- `codex resume <id> continue fixing tests`
+- `/claude resume <id> …` or bare `resume <id> …` with sticky/default Claude
+- `/agy resume <id> …` or `agy --conversation <id>` (Antigravity; `resume` is an accepted alias)
+- Explicit resume beats chat auto-resume and the reply footer session
 
 Notes:
 

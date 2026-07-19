@@ -188,5 +188,7 @@ def test_resolve_message_reconstructs_omp_resume_from_directive() -> None:
     )
 
     assert resolved.engine_override == "omp"
-    assert resolved.prompt == "resume abc123 continue"
+    assert resolved.user_resume == ResumeToken(engine="omp", value="abc123")
     assert resolved.resume_token == ResumeToken(engine="omp", value="abc123")
+    # Resume prefix is stripped from the agent prompt.
+    assert resolved.prompt == "continue"

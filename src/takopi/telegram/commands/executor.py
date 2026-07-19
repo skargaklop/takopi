@@ -386,7 +386,10 @@ class _TelegramCommandExecutor(CommandExecutor):
             else self._on_thread_known
         )
 
-        # Extract resume token from prompt text
+        # Extract resume token from prompt text (user-explicit wins; bare `resume`
+        # is a universal alias for every engine including agy).
+        from ...resume_parse import parse_bare_resume, strip_resume_lines
+
         prompt = request.prompt
         resume_token: ResumeToken | None = None
         try:
@@ -396,23 +399,18 @@ class _TelegramCommandExecutor(CommandExecutor):
             runner = entry.runner
             resume_token = runner.extract_resume(prompt)
             if resume_token is not None:
-                lines = [
-                    l for l in prompt.splitlines() if not runner.is_resume_line(l)
-                ]
-                prompt = "\n".join(lines)
-        except Exception:
+                prompt = strip_resume_lines(
+                    prompt, is_resume_line=runner.is_resume_line
+                )
+        except Exception:  # noqa: BLE001, S110
             pass
 
-        # Fallback for command-stripped /ENGINE resume <token> / --resume / --session / -s / -r
         if resume_token is None:
-            import re as _re
-            m = _re.match(
-                r"^\s*(?:resume|--resume|--session|-r|-s)\s+(\S+)\s*(.*)$",
-                prompt, _re.DOTALL,
-            )
-            if m:
-                resume_token = ResumeToken(engine=engine, value=m.group(1))
-                prompt = m.group(2) or ""
+            bare = parse_bare_resume(prompt)
+            if bare is not None:
+                token, rest = bare
+                resume_token = ResumeToken(engine=engine, value=token)
+                prompt = rest
 
         if mode == "capture":
             capture = _CaptureTransport()

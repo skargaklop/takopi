@@ -25,10 +25,10 @@ ENGINE: EngineId = "claude"
 DEFAULT_ALLOWED_TOOLS = ["Bash", "Read", "Edit", "Write"]
 
 _RESUME_RE = re.compile(
-    r"(?im)^\s*`?claude\s+(?:--resume|-r)\s+(?P<token>[^`\s]+)`?(?:\s|$)"
+    r"(?im)^\s*`?claude\s+(?:resume|--resume|-r)\s+(?P<token>[^`\s]+)`?(?:\s|$)"
 )
 _RESUME_LINE_RE = re.compile(
-    r"(?im)^\s*`?claude\s+(?:--resume|-r)\s+(?P<token>[^`\s]+)`?\s*$"
+    r"(?im)^\s*`?claude\s+(?:resume|--resume|-r)\s+(?P<token>[^`\s]+)`?\s*$"
 )
 
 

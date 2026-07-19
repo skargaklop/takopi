@@ -39,10 +39,10 @@ ENGINE: EngineId = "pi"
 
 _TOKEN_PATTERN = r'(?P<token>"[^"]+"|\'[^\']+\'|[^\s`]+)'
 _RESUME_RE = re.compile(
-    rf"(?im)^\s*`?pi\s+(?:--session|resume)\s+{_TOKEN_PATTERN}`?(?:\s|$)"
+    rf"(?im)^\s*`?pi\s+(?:--session|resume|--resume|-r|-s)\s+{_TOKEN_PATTERN}`?(?:\s|$)"
 )
 _RESUME_LINE_RE = re.compile(
-    rf"(?im)^\s*`?pi\s+(?:--session|resume)\s+{_TOKEN_PATTERN}`?\s*$"
+    rf"(?im)^\s*`?pi\s+(?:--session|resume|--resume|-r|-s)\s+{_TOKEN_PATTERN}`?\s*$"
 )
 
 _SESSION_ID_PREFIX_LEN = 8

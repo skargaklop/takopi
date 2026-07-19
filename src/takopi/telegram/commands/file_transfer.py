@@ -173,6 +173,11 @@ async def _prepare_file_put_plan(
             engine_override=resolved.engine_override,
             context=upload_context,
             context_source=resolved.context_source or "default_project",
+            plan=resolved.plan,
+            goal=resolved.goal,
+            user_resume=resolved.user_resume,
+            bare_resume_id=resolved.bare_resume_id,
+            reply_resume=resolved.reply_resume,
         )
     try:
         run_root = cfg.runtime.resolve_run_cwd(upload_context)

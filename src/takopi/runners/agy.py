@@ -31,12 +31,15 @@ logger = get_logger(__name__)
 ENGINE: EngineId = "agy"
 
 _TOKEN_PATTERN = r"(?P<token>[^`\s]+)"
-# Note: -c is --continue (most-recent), NOT conversation. Only --conversation resumes by id.
+# Native: --conversation. Alias: resume / --resume / -r (universal across agents).
+# Note: -c is --continue (most-recent), NOT conversation id.
 _RESUME_RE = re.compile(
-    rf"(?im)^\s*`?agy\s+--conversation(?:=|\s+){_TOKEN_PATTERN}`?(?:\s|$)"
+    rf"(?im)^\s*`?agy\s+(?:--conversation(?:=|\s+)|(?:resume|--resume|-r)\s+)"
+    rf"{_TOKEN_PATTERN}`?(?:\s|$)"
 )
 _RESUME_LINE_RE = re.compile(
-    rf"(?im)^\s*`?agy\s+--conversation(?:=|\s+){_TOKEN_PATTERN}`?\s*$"
+    rf"(?im)^\s*`?agy\s+(?:--conversation(?:=|\s+)|(?:resume|--resume|-r)\s+)"
+    rf"{_TOKEN_PATTERN}`?\s*$"
 )
 
 # Best-effort session id scrape from logs / exit banners.
