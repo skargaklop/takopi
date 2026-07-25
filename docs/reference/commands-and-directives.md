@@ -42,7 +42,7 @@ Notes:
 | grok | yes | no | `--permission-mode plan` | best-effort `/goal` prompt |
 | agy | yes | no | `--mode plan` | soft note |
 | omp | yes | no | `omp.plan_mode=soft\|yolo\|off` | soft note |
-| pi | yes | no | soft, or `--plan` if `pi.plan_flag=true` | soft note |
+| pi | yes | no | `--plan` (pi-plan-mode extension) | soft note |
 | opencode | yes | no | soft, or `--agent` if `opencode.plan_agent` set | soft note |
 
 See [Context resolution](context-resolution.md) for the full rules.
@@ -74,7 +74,7 @@ This line is parsed from replies and takes precedence over new directives.
 **Agent → user files (Takopi-mediated):** when files are enabled and `send_enabled` is true, agents may deliver files by writing under the project and including:
 
 ```text
-[[takopi-send: relative/path/file.ext]]
+[[takopi-send: /absolute/path/file.ext]]
 ```
 
 Allowed extensions come from `send_extensions` (default: jpg/png/gif/pdf/md/html/doc/docx/xls/xlsx). In **plan mode**, a `.md` or `.html` delivery is required (`plan_require_send`); if missing, Takopi can auto-write `outgoing/plan-*.md` (`plan_auto_file`).

@@ -71,13 +71,11 @@ class OmpRunner(PiRunner):
         model: str | None,
         provider: str | None,
         plan_mode: str = "soft",
-        plan_flag: bool = False,
     ) -> None:
         super().__init__(
             extra_args=extra_args,
             model=model,
             provider=provider,
-            plan_flag=plan_flag,
         )
         # off | soft | yolo
         self.plan_mode = (plan_mode or "soft").strip().lower()

@@ -107,9 +107,9 @@ def build_send_instruction(
         "To send a file to the user via Takopi (not Telegram agent tools):",
         "1. Write the file under the project root.",
         "2. Include a line exactly like:",
-        "   [[takopi-send: relative/path/to/file.ext]]",
+        "   [[takopi-send: /absolute/path/to/file.ext]]",
         f"Allowed extensions: {ext_list or '(none configured)'}",
-        "Paths must stay inside the project (no absolute paths outside the repo).",
+        "Paths must resolve inside the project (absolute or relative).",
     ]
     if plan_mode:
         lines.extend(
@@ -141,6 +141,41 @@ def append_send_instruction(
     return f"{body}\n\n{block}"
 
 
+def _resolve_outbound_path(
+    raw: str, *, run_root: Path
+) -> tuple[Path, Path] | None:
+    """Resolve an outbound marker path to (relative, absolute) within run_root.
+
+    Accepts both project-relative paths and absolute paths that resolve inside
+    ``run_root``. Returns None on rejection (invalid, escapes root, absolute
+    outside root). The first element is the project-relative form used for
+    deny-glob matching, extension checks, and reporting; the second is the
+    resolved absolute target.
+    """
+    raw_path = Path(raw)
+    if raw_path.is_absolute():
+        root_resolved = run_root.resolve(strict=False)
+        try:
+            target = raw_path.resolve(strict=False)
+        except OSError:
+            return None
+        if not target.is_relative_to(root_resolved):
+            return None
+        try:
+            rel = target.relative_to(root_resolved)
+        except ValueError:
+            return None
+        return rel, target
+    rel = normalize_relative_path(raw)
+    if rel is None:
+        return None
+    target = resolve_path_within_root(run_root, rel)
+    if target is None:
+        return None
+    return rel, target
+
+
+
 def _validate_and_load(
     rel_raw: str,
     *,
@@ -148,9 +183,10 @@ def _validate_and_load(
     settings: OutboundSettings,
 ) -> OutboundFile:
     allowed = {normalize_extension(e) for e in settings.send_extensions}
-    rel = normalize_relative_path(rel_raw)
-    if rel is None:
+    resolved = _resolve_outbound_path(rel_raw, run_root=run_root)
+    if resolved is None:
         return OutboundFile(rel_path=rel_raw, ok=False, error="invalid path")
+    rel, target = resolved
     rel_s = rel.as_posix()
     ext = normalize_extension(rel.suffix)
     if ext not in allowed:
@@ -162,9 +198,6 @@ def _validate_and_load(
         return OutboundFile(
             rel_path=rel_s, ok=False, error=f"path denied by rule: {denied}"
         )
-    target = resolve_path_within_root(run_root, rel)
-    if target is None:
-        return OutboundFile(rel_path=rel_s, ok=False, error="path escapes project root")
     if not target.is_file():
         return OutboundFile(rel_path=rel_s, ok=False, error="file does not exist")
     try:

@@ -370,21 +370,3 @@ def test_pi_single_line_prompt_stays_as_arg() -> None:
     assert args[-1] == prompt
     assert payload is None
 
-
-def test_pi_soft_plan_prompt_goes_via_stdin() -> None:
-    """The soft-plan prefix is multi-line, so it must go via stdin.
-
-    This is the regression test for the `/plan <prompt>` failure with the
-    pi engine (default config, no ``pi.plan_flag``).
-    """
-    from takopi.runners.run_options import EngineRunOptions, apply_run_options
-
-    runner = PiRunner(extra_args=[], model=None, provider=None, plan_flag=False)
-    state = PiStreamState(resume=ResumeToken(engine=ENGINE, value="s.jsonl"))
-    with apply_run_options(EngineRunOptions(plan=True)):
-        args = runner.build_args("design the API", None, state=state)
-        payload = runner.stdin_payload("design the API", None, state=state)
-    assert payload is not None
-    assert "plan" in payload.decode().lower()
-    assert "design the API" in payload.decode()
-    assert "design the API" not in args

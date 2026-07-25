@@ -27,7 +27,7 @@ from ..model import (
     TakopiEvent,
 )
 from ..runner import JsonlSubprocessRunner, ResumeTokenMixin, Runner
-from .modes import effective_prompt, run_modes
+from .modes import run_modes
 from .run_options import get_run_options
 from ..schemas import pi as pi_schema
 from ..utils.paths import get_run_base_dir
@@ -289,12 +289,10 @@ class PiRunner(ResumeTokenMixin, JsonlSubprocessRunner):
         extra_args: list[str],
         model: str | None,
         provider: str | None,
-        plan_flag: bool = False,
     ) -> None:
         self.extra_args = extra_args
         self.model = model
         self.provider = provider
-        self.plan_flag = plan_flag
 
     def format_resume(self, token: ResumeToken) -> str:
         if token.engine != ENGINE:
@@ -348,32 +346,29 @@ class PiRunner(ResumeTokenMixin, JsonlSubprocessRunner):
         return session_id
 
     def _final_prompt(self, prompt: str) -> str:
-        """Apply goal/plan mode mutations to the prompt.
+        """Apply goal mode mutation to the prompt.
 
-        Shared by ``build_args`` and ``stdin_payload`` so both agree on the
-        exact prompt text that reaches pi.
+        Plan mode is delegated to the pi-plan-mode extension via ``--plan`` and
+        does not mutate the prompt. Shared by ``build_args`` and
+        ``stdin_payload`` so both agree on the exact prompt text.
         """
         run_options = get_run_options()
-        plan, goal = run_modes(run_options)
-        if goal is not None:
-            body = prompt.strip()
-            note = f"(autonomous goal — work until: {goal})"
-            return f"{note}\n\n{body}" if body else note
-        if plan and self.plan_flag:
+        _plan, goal = run_modes(run_options)
+        if goal is None:
             return prompt
-        if plan:
-            return effective_prompt(prompt, soft_plan=True, options=run_options)
-        return prompt
+        body = prompt.strip()
+        note = f"(autonomous goal — work until: {goal})"
+        return f"{note}\n\n{body}" if body else note
 
     @staticmethod
     def _prompt_needs_stdin(prompt: str) -> bool:
         """True when the prompt must be sent via stdin instead of a CLI arg.
 
         ``pi.cmd`` (the Windows batch wrapper) rejects argv elements containing
-        newlines with "batch file arguments are invalid" (rc=126). The soft-plan
-        and autonomous-goal prefixes inject newlines, so any multi-line prompt
-        is piped through stdin; single-line prompts keep the argv path to match
-        the existing session/attachment ordering contract.
+        newlines with "batch file arguments are invalid" (rc=126). The
+        autonomous-goal prefix and any multi-line user prompt inject newlines,
+        so they are piped through stdin; single-line prompts keep the argv
+        path to match the existing session/attachment ordering contract.
         """
         return "\n" in prompt
 
@@ -397,7 +392,7 @@ class PiRunner(ResumeTokenMixin, JsonlSubprocessRunner):
             args.extend(["--model", model])
         if run_options is not None and run_options.reasoning:
             args.extend(["--thinking", str(run_options.reasoning)])
-        if plan and self.plan_flag:
+        if plan:
             args.append("--plan")
         session_value = self._resolve_session_path(state.resume.value)
         args.extend(["--session", session_value])
@@ -587,13 +582,10 @@ def build_runner(config: EngineConfig, config_path: Path) -> Runner:
     if provider is not None and not isinstance(provider, str):
         raise ConfigError(f"Invalid `pi.provider` in {config_path}; expected a string.")
 
-    plan_flag = config.get("plan_flag") is True
-
     return PiRunner(
         extra_args=extra_args,
         model=model,
         provider=provider,
-        plan_flag=plan_flag,
     )
 
 

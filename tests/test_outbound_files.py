@@ -97,6 +97,35 @@ def test_process_allows_md_within_root(tmp_path: Path) -> None:
     assert "[[takopi-send" not in result.answer
 
 
+def test_process_allows_absolute_path_within_root(tmp_path: Path) -> None:
+    (tmp_path / "docs").mkdir()
+    (tmp_path / "docs" / "plan.md").write_text("# Plan\n", encoding="utf-8")
+    abs_path = tmp_path / "docs" / "plan.md"
+    answer = f"Done.\n[[takopi-send: {abs_path.as_posix()}]]\n"
+    result = process_outbound_answer(
+        answer, run_root=tmp_path, settings=_settings(), plan_mode=False
+    )
+    assert len(result.files) == 1
+    assert result.files[0].ok
+    assert result.files[0].content is not None
+    assert result.files[0].content.replace(b"\r\n", b"\n") == b"# Plan\n"
+    assert "[[takopi-send" not in result.answer
+
+
+def test_process_rejects_absolute_path_outside_root(tmp_path: Path) -> None:
+    outside = tmp_path.parent / "secret.md"
+    try:
+        outside.write_text("s", encoding="utf-8")
+        answer = f"[[takopi-send: {outside.as_posix()}]]"
+        result = process_outbound_answer(
+            answer, run_root=tmp_path, settings=_settings()
+        )
+        assert result.files[0].ok is False
+    finally:
+        if outside.exists():
+            outside.unlink()
+
+
 def test_process_rejects_bad_extension(tmp_path: Path) -> None:
     (tmp_path / "x.exe").write_bytes(b"MZ")
     result = process_outbound_answer(

@@ -87,10 +87,10 @@ When `allowed_user_ids` is set, updates without a sender id (for example, some c
 Agent outbound protocol (when `enabled` and `send_enabled`):
 
 ```text
-[[takopi-send: relative/path/to/file.ext]]
+[[takopi-send: /absolute/path/to/file.ext]]
 ```
 
-Takopi validates the path (whitelist, deny_globs, project root, size), then sends a Telegram document. Markers are stripped from the chat text.
+Takopi validates the path (whitelist, deny_globs, must resolve inside the project root, size), then sends a Telegram document. Both absolute and project-relative paths are accepted. Markers are stripped from the chat text.
 
 File size limits (not configurable):
 

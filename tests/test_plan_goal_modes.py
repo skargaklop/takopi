@@ -273,26 +273,26 @@ def test_omp_soft_plan_prefixes_prompt() -> None:
     assert "design auth" in prompt
 
 
-def test_pi_plan_flag_when_enabled() -> None:
-    runner = PiRunner(extra_args=[], model=None, provider=None, plan_flag=True)
+def test_pi_plan_mode_appends_flag() -> None:
+    """In plan mode the pi runner always appends ``--plan`` (no soft-plan path).
+
+    The pi-plan-mode extension is the supported mechanism; takopi no longer
+    gates ``--plan`` behind a ``pi.plan_flag`` config flag.
+    """
+    runner = PiRunner(extra_args=[], model=None, provider=None)
     state = PiStreamState(resume=ResumeToken(engine=PI_ENGINE, value="s.jsonl"))
     with apply_run_options(EngineRunOptions(plan=True)):
         args = runner.build_args("design", None, state=state)
     assert "--plan" in args
+    # No soft-plan prefix is injected; the prompt is passed through unchanged.
+    assert "design" in args
 
 
-def test_pi_soft_plan_default() -> None:
-    runner = PiRunner(extra_args=[], model=None, provider=None, plan_flag=False)
+def test_pi_non_plan_mode_omits_flag() -> None:
+    runner = PiRunner(extra_args=[], model=None, provider=None)
     state = PiStreamState(resume=ResumeToken(engine=PI_ENGINE, value="s.jsonl"))
-    with apply_run_options(EngineRunOptions(plan=True)):
-        args = runner.build_args("design", None, state=state)
-        payload = runner.stdin_payload("design", None, state=state)
-    # Soft-plan prefix is multi-line, so it is piped via stdin (not argv).
-    assert payload is not None
-    text = payload.decode()
-    assert "plan" in text.lower()
-    assert "design" in text
-    assert "design" not in args
+    args = runner.build_args("design", None, state=state)
+    assert "--plan" not in args
 
 
 def test_opencode_plan_agent_when_configured() -> None:
