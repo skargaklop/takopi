@@ -221,7 +221,11 @@ async def _run_engine(
             if cwd is not None:
                 run_fields["cwd"] = str(cwd)
             bind_run_context(**run_fields)
-            context_line = runtime.format_context_line(context)
+            context_line = runtime.compose_context_line(
+                context,
+                plan=bool(run_options is not None and run_options.plan),
+                goal=run_options.goal if run_options is not None else None,
+            )
             outbound = (
                 settings_from_files_config(files_settings)
                 if files_settings is not None

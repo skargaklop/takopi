@@ -195,3 +195,36 @@ def format_context_line(
     if context.branch:
         return f"`ctx: {alias} @{context.branch}`"
     return f"`ctx: {alias}`"
+
+
+def format_mode_badge(*, plan: bool, goal: str | None) -> str | None:
+    """Return the plan/goal footer badge, or None when no mode is active.
+
+    Goal wins over plan when both are set (matches ``run_modes`` precedence).
+    The badge is rendered as inline code so it sits next to the ``ctx:`` line.
+    """
+    if goal:
+        return "`goal`"
+    if plan:
+        return "`plan`"
+    return None
+
+
+def compose_context_line(
+    context: RunContext | None,
+    projects: ProjectsConfig,
+    *,
+    plan: bool = False,
+    goal: str | None = None,
+) -> str | None:
+    """Build the footer context line with an optional plan/goal mode badge.
+
+    The badge (when present) precedes the ``ctx: <project>`` segment,
+    space-separated on the same footer line. Returns None when neither a badge
+    nor a context line applies.
+    """
+    badge = format_mode_badge(plan=plan, goal=goal)
+    ctx = format_context_line(context, projects=projects)
+    if badge is not None and ctx is not None:
+        return f"{badge} {ctx}"
+    return badge or ctx

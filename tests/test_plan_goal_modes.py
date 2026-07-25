@@ -341,3 +341,65 @@ def test_progress_queued_not_steerable_cancel_only() -> None:
         state, elapsed_s=0.0, label="queued", steerable=False
     )
     assert message.extra.get("reply_markup") == CANCEL_MARKUP
+
+
+# --- mode badge + footer composition (plan/goal indicator) ---
+
+from takopi.config import ProjectConfig
+from takopi.context import RunContext
+from takopi.directives import compose_context_line, format_context_line, format_mode_badge
+
+
+def _projects_with(alias: str = "z80") -> ProjectsConfig:
+    return ProjectsConfig(
+        projects={
+            alias: ProjectConfig(
+                alias=alias, path=Path("."), worktrees_dir=Path(".worktrees")
+            )
+        }
+    )
+
+
+def test_format_mode_badge_plan() -> None:
+    assert format_mode_badge(plan=True, goal=None) == "`plan`"
+
+
+def test_format_mode_badge_goal_wins_over_plan() -> None:
+    assert format_mode_badge(plan=True, goal="all tests pass") == "`goal`"
+
+
+def test_format_mode_badge_goal_only() -> None:
+    assert format_mode_badge(plan=False, goal="x") == "`goal`"
+
+
+def test_format_mode_badge_none() -> None:
+    assert format_mode_badge(plan=False, goal=None) is None
+    assert format_mode_badge(plan=False, goal="") is None
+
+
+def test_compose_context_line_plan_with_ctx() -> None:
+    ctx = RunContext(project="z80", branch="feat/api")
+    line = compose_context_line(ctx, _projects_with(), plan=True, goal=None)
+    assert line == "`plan` `ctx: z80 @feat/api`"
+
+
+def test_compose_context_line_goal_only_no_ctx() -> None:
+    line = compose_context_line(None, _empty_projects(), plan=False, goal="cond")
+    assert line == "`goal`"
+
+
+def test_compose_context_line_no_mode_returns_ctx() -> None:
+    ctx = RunContext(project="z80")
+    line = compose_context_line(ctx, _projects_with(), plan=False, goal=None)
+    assert line == "`ctx: z80`"
+
+
+def test_compose_context_line_no_mode_no_ctx() -> None:
+    assert compose_context_line(None, _empty_projects(), plan=False, goal=None) is None
+
+
+def test_format_context_line_unchanged_when_no_mode() -> None:
+    """Existing format_context_line behavior must not regress."""
+    ctx = RunContext(project="z80", branch="feat")
+    assert format_context_line(ctx, projects=_projects_with()) == "`ctx: z80 @feat`"
+    assert format_context_line(None, projects=_empty_projects()) is None

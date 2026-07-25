@@ -9,6 +9,7 @@ from .config import ConfigError, ProjectsConfig
 from .context import RunContext
 from .directives import (
     ParsedDirectives,
+    compose_context_line,
     format_context_line,
     parse_context_line,
     parse_directives,
@@ -445,3 +446,14 @@ class TransportRuntime:
 
     def format_context_line(self, context: RunContext | None) -> str | None:
         return format_context_line(context, projects=self._projects)
+
+    def compose_context_line(
+        self,
+        context: RunContext | None,
+        *,
+        plan: bool = False,
+        goal: str | None = None,
+    ) -> str | None:
+        return compose_context_line(
+            context, self._projects, plan=plan, goal=goal
+        )

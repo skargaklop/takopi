@@ -54,6 +54,8 @@ When a run has project context, Takopi appends a footer line rendered as inline 
 - With branch: `` `ctx: <project> @<branch>` ``
 - Without branch: `` `ctx: <project>` ``
 
+If the run is in **plan mode** or **goal mode**, a `` `plan` `` or `` `goal` `` badge precedes the `ctx:` segment on the same footer line (goal wins if both apply). When no project context is bound, the badge appears on its own. Example with plan mode: `` `plan` `ctx: <project> @<branch>` ``.
+
 This line is parsed from replies and takes precedence over new directives.
 
 ## Telegram in-chat commands

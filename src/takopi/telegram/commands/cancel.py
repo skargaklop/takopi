@@ -183,7 +183,9 @@ async def _edit_labelled_message(
 ) -> None:
     tracker = ProgressTracker(engine=job.resume_token.engine)
     tracker.set_resume(job.resume_token)
-    context_line = cfg.runtime.format_context_line(job.context)
+    context_line = cfg.runtime.compose_context_line(
+        job.context, plan=job.plan, goal=job.goal
+    )
     resume_formatter = None
     if cfg.show_resume_line or cfg.session_mode != "chat":
         resume_formatter = cfg.runtime.resolve_runner(

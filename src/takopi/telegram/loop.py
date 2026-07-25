@@ -1059,10 +1059,14 @@ async def _send_queued_progress(
     context: RunContext | None,
     is_queued: bool,
     turn_steerable: bool = False,
+    plan: bool = False,
+    goal: str | None = None,
 ) -> MessageRef | None:
     tracker = ProgressTracker(engine=resume_token.engine)
     tracker.set_resume(resume_token)
-    context_line = cfg.runtime.format_context_line(context)
+    context_line = cfg.runtime.compose_context_line(
+        context, plan=plan, goal=goal
+    )
     resume_formatter = None
     if should_show_resume_line(
         show_resume_line=cfg.show_resume_line,
@@ -1628,6 +1632,8 @@ async def run_main_loop(
                     turn_steerable=_thread_turn_steerable(
                         state.running_tasks, resume_token
                     ),
+                    plan=plan,
+                    goal=goal,
                 )
                 await scheduler.enqueue_resume(
                     chat_id,

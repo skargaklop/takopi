@@ -2,6 +2,10 @@
 
 ## unreleased
 
+### features
+
+- show a `plan` or `goal` mode badge in the Telegram message footer, preceding the `ctx:` line, so active plan/goal runs are visible at a glance.
+
 ### changes
 
 - pi plan mode now always appends `--plan` (delegating to the pi-plan-mode extension) instead of injecting a soft-plan prompt prefix. Removed the `pi.plan_flag` config flag — it is no longer needed.
