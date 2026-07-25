@@ -286,8 +286,13 @@ def test_pi_soft_plan_default() -> None:
     state = PiStreamState(resume=ResumeToken(engine=PI_ENGINE, value="s.jsonl"))
     with apply_run_options(EngineRunOptions(plan=True)):
         args = runner.build_args("design", None, state=state)
-    prompt = args[-1]
-    assert "plan" in prompt.lower()
+        payload = runner.stdin_payload("design", None, state=state)
+    # Soft-plan prefix is multi-line, so it is piped via stdin (not argv).
+    assert payload is not None
+    text = payload.decode()
+    assert "plan" in text.lower()
+    assert "design" in text
+    assert "design" not in args
 
 
 def test_opencode_plan_agent_when_configured() -> None:

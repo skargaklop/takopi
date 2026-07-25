@@ -1,5 +1,11 @@
 # changelog
 
+## unreleased
+
+### fixes
+
+- pipe multi-line pi prompts (soft-plan, autonomous-goal, and any user prompt with newlines) through stdin instead of a CLI arg, fixing `pi failed (rc=126)` on Windows where `pi.cmd` rejects argv elements containing newlines. This was the root cause of `/plan <prompt>` failing for the pi engine.
+
 ## v0.26.0 (2026-07-18)
 
 ### features

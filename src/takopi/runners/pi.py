@@ -347,6 +347,36 @@ class PiRunner(ResumeTokenMixin, JsonlSubprocessRunner):
                     return str(f.resolve())
         return session_id
 
+    def _final_prompt(self, prompt: str) -> str:
+        """Apply goal/plan mode mutations to the prompt.
+
+        Shared by ``build_args`` and ``stdin_payload`` so both agree on the
+        exact prompt text that reaches pi.
+        """
+        run_options = get_run_options()
+        plan, goal = run_modes(run_options)
+        if goal is not None:
+            body = prompt.strip()
+            note = f"(autonomous goal — work until: {goal})"
+            return f"{note}\n\n{body}" if body else note
+        if plan and self.plan_flag:
+            return prompt
+        if plan:
+            return effective_prompt(prompt, soft_plan=True, options=run_options)
+        return prompt
+
+    @staticmethod
+    def _prompt_needs_stdin(prompt: str) -> bool:
+        """True when the prompt must be sent via stdin instead of a CLI arg.
+
+        ``pi.cmd`` (the Windows batch wrapper) rejects argv elements containing
+        newlines with "batch file arguments are invalid" (rc=126). The soft-plan
+        and autonomous-goal prefixes inject newlines, so any multi-line prompt
+        is piped through stdin; single-line prompts keep the argv path to match
+        the existing session/attachment ordering contract.
+        """
+        return "\n" in prompt
+
     def build_args(
         self,
         prompt: str,
@@ -355,15 +385,8 @@ class PiRunner(ResumeTokenMixin, JsonlSubprocessRunner):
         state: PiStreamState,
     ) -> list[str]:
         run_options = get_run_options()
-        plan, goal = run_modes(run_options)
-        if goal is not None:
-            body = prompt.strip()
-            note = f"(autonomous goal — work until: {goal})"
-            prompt = f"{note}\n\n{body}" if body else note
-        elif plan and self.plan_flag:
-            pass
-        elif plan:
-            prompt = effective_prompt(prompt, soft_plan=True, options=run_options)
+        plan, _goal = run_modes(run_options)
+        final_prompt = self._final_prompt(prompt)
         args: list[str] = [*self.extra_args, "--print", "--mode", "json"]
         if self.provider:
             args.extend(["--provider", self.provider])
@@ -385,7 +408,8 @@ class PiRunner(ResumeTokenMixin, JsonlSubprocessRunner):
                 for attachment in run_options.attachments
                 if attachment.kind == "image" and attachment.rel_path
             )
-        args.append(self._sanitize_prompt(prompt))
+        if not self._prompt_needs_stdin(final_prompt):
+            args.append(self._sanitize_prompt(final_prompt))
         return args
 
     def stdin_payload(
@@ -395,7 +419,10 @@ class PiRunner(ResumeTokenMixin, JsonlSubprocessRunner):
         *,
         state: PiStreamState,
     ) -> bytes | None:
-        return None
+        final_prompt = self._final_prompt(prompt)
+        if not self._prompt_needs_stdin(final_prompt):
+            return None
+        return final_prompt.encode()
 
     def env(self, *, state: PiStreamState) -> dict[str, str] | None:
         env = dict(os.environ)
