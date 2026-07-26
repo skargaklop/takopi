@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 from takopi.config import ProjectsConfig
 from takopi.model import ResumeToken
 from takopi.resume_parse import parse_bare_resume, strip_engine_resume_prefix
@@ -12,6 +10,7 @@ from takopi.runners.agy import AgyRunner
 from takopi.runners.claude import ClaudeRunner
 from takopi.runners.codex import CodexRunner
 from takopi.runners.mock import Return, ScriptRunner
+from takopi.telegram.loop import _resolve_run_engine
 from takopi.transport_runtime import TransportRuntime
 
 
@@ -159,3 +158,57 @@ def test_codex_resume_line_strips_from_prompt() -> None:
     assert resolved.user_resume == ResumeToken(engine="codex", value="sid-9")
     assert "fix flaky test" in resolved.prompt
     assert "sid-9" not in resolved.prompt
+
+
+
+# --- run engine resolution: user resume > reply resume > default ---
+
+
+
+def test_resolve_run_engine_reply_resume_overrides_default() -> None:
+    """Replying to an omp run's footer must carry omp forward, not codex."""
+    assert (
+        _resolve_run_engine(
+            engine_default="codex",
+            user_resume=None,
+            reply_resume=ResumeToken(engine="omp", value="abc"),
+        )
+        == "omp"
+    )
+
+
+def test_resolve_run_engine_user_resume_beats_reply() -> None:
+    """Explicit user resume wins over the replied-to footer's engine."""
+    assert (
+        _resolve_run_engine(
+            engine_default="codex",
+            user_resume=ResumeToken(engine="claude", value="x"),
+            reply_resume=ResumeToken(engine="omp", value="y"),
+        )
+        == "claude"
+    )
+
+
+def test_resolve_run_engine_no_resume_keeps_default() -> None:
+    """No resume sources → default engine unchanged (regression guard)."""
+    assert (
+        _resolve_run_engine(
+            engine_default="codex",
+            user_resume=None,
+            reply_resume=None,
+        )
+        == "codex"
+    )
+
+
+def test_resolve_run_engine_reply_resume_any_engine() -> None:
+    """Applies to every engine, not just omp."""
+    for engine in ("codex", "claude", "agy", "grok", "omp", "pi", "opencode"):
+        assert (
+            _resolve_run_engine(
+                engine_default="codex",
+                user_resume=None,
+                reply_resume=ResumeToken(engine=engine, value="sid"),
+            )
+            == engine
+        ), engine

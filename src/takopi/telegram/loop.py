@@ -796,6 +796,25 @@ class ResumeDecision:
     handled_by_running_task: bool
 
 
+def _resolve_run_engine(
+    *,
+    engine_default: EngineId,
+    user_resume: ResumeToken | None,
+    reply_resume: ResumeToken | None,
+) -> EngineId:
+    """Pick the engine for routing and stored-session lookups.
+
+    Precedence: explicit user resume (typed in the message) > reply footer
+    resume (from the replied-to message) > resolved default engine. This makes
+    replying to a prior run's message carry that run's engine forward, instead
+    of falling back to the global default for session storage.
+    """
+    source = user_resume or reply_resume
+    if source is not None:
+        return source.engine
+    return engine_default
+
+
 class ResumeResolver:
     def __init__(
         self,
@@ -1577,12 +1596,15 @@ async def run_main_loop(
                     chat_id=chat_id,
                     topic_key=topic_key,
                 )
-                engine_override = engine_resolution.engine
-                # Explicit user resume forces its engine for store lookups / routing.
-                engine_for_session = engine_resolution.engine
-                if resolved.user_resume is not None:
-                    engine_for_session = resolved.user_resume.engine
-                    engine_override = resolved.user_resume.engine
+                # Explicit user resume forces its engine for store lookups / routing;
+                # otherwise a reply to a prior run's footer carries that engine forward.
+                run_engine_id = _resolve_run_engine(
+                    engine_default=engine_resolution.engine,
+                    user_resume=resolved.user_resume,
+                    reply_resume=resolved.reply_resume,
+                )
+                engine_override = run_engine_id
+                engine_for_session = run_engine_id
                 resume_decision = await resume_resolver.resolve(
                     resume_token=resolved.resume_token,
                     reply_id=reply_id,

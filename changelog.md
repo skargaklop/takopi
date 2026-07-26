@@ -13,6 +13,7 @@
 ### fixes
 
 - pipe multi-line pi prompts (autonomous-goal prefix and any user prompt with newlines) through stdin instead of a CLI arg, fixing `pi failed (rc=126)` on Windows where `pi.cmd` rejects argv elements containing newlines.
+- replying to a prior run's message now carries that run's engine forward for routing and stored-session lookups (previously only an explicit `/engine resume <id>` did, so replying to a non-default-engine run could start the default engine instead).
 - outbound file delivery (`[[takopi-send: ...]]`) now accepts absolute paths that resolve inside the project root, not just project-relative paths. Paths escaping the root are still rejected.
 
 ## v0.26.0 (2026-07-18)
