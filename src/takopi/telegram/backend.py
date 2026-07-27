@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import os
+import signal
 from pathlib import Path
+from collections.abc import Callable
 from typing import Literal
 
 import anyio
@@ -80,6 +82,28 @@ def _build_startup_message(
     )
 
 
+def _install_sigint_cancel_handler(scope: anyio.CancelScope) -> Callable[[], None]:
+    """Install a SIGINT handler that cancels the given scope instead of raising.
+
+    Returns a restore callable that reinstalls the previous handler. This lets
+    Ctrl+C propagate as a cooperative cancellation through the live event loop,
+    so every ``finally`` block (subprocess termination, transport ``close()``)
+    runs before the loop exits — instead of the asyncio loop being torn down
+    by a raw ``KeyboardInterrupt`` that skips async cleanup.
+    """
+    previous = signal.getsignal(signal.SIGINT)
+
+    def _handler(*_args: object) -> None:
+        scope.cancel()
+
+    signal.signal(signal.SIGINT, _handler)
+
+    def restore() -> None:
+        signal.signal(signal.SIGINT, previous)
+
+    return restore
+
+
 class TelegramBackend(TransportBackend):
     id = "telegram"
     description = "Telegram bot"
@@ -148,13 +172,18 @@ class TelegramBackend(TransportBackend):
         )
 
         async def run_loop() -> None:
-            await run_main_loop(
-                cfg,
-                watch_config=runtime.watch_config,
-                default_engine_override=default_engine_override,
-                transport_id=self.id,
-                transport_config=settings,
-            )
+            with anyio.CancelScope() as scope:
+                restore = _install_sigint_cancel_handler(scope)
+                try:
+                    await run_main_loop(
+                        cfg,
+                        watch_config=runtime.watch_config,
+                        default_engine_override=default_engine_override,
+                        transport_id=self.id,
+                        transport_config=settings,
+                    )
+                finally:
+                    restore()
 
         anyio.run(run_loop)
 

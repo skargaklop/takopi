@@ -2242,4 +2242,5 @@ async def run_main_loop(
             async for update in poller_fn(cfg):
                 await route_update(update)
     finally:
-        await cfg.exec_cfg.transport.close()
+        with anyio.CancelScope(shield=True):
+            await cfg.exec_cfg.transport.close()
