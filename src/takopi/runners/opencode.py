@@ -14,6 +14,7 @@ Session IDs use the format: ses_XXXX (e.g., ses_494719016ffe85dkDMj0FPRbHK)
 from __future__ import annotations
 
 import re
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal
@@ -23,6 +24,8 @@ import msgspec
 from ..backends import EngineBackend, EngineConfig
 from ..config import ConfigError
 from ..logging import get_logger
+from ..compact import CompactSupport
+from ..events import EventFactory
 from ..model import (
     Action,
     ActionEvent,
@@ -320,12 +323,73 @@ class OpenCodeRunner(ResumeTokenMixin, JsonlSubprocessRunner):
     model: str | None = None
     plan_agent: str | None = None
     session_title: str = "opencode"
+    compact_api_base_url: str | None = None
+    compact_http_client: Any = None
+    compact_wait: bool = True
     logger = logger
 
     def format_resume(self, token: ResumeToken) -> str:
         if token.engine != ENGINE:
             raise RuntimeError(f"resume token is for engine {token.engine!r}")
         return f"`opencode --session {token.value}`"
+
+    def compact_support(self) -> CompactSupport:
+        return CompactSupport(
+            mode="native_api",
+            accepts_instructions=False,
+            true_compaction=True,
+            note="OpenCode compact uses the server API, not a CLI subcommand",
+        )
+
+    async def compact(
+        self,
+        resume: ResumeToken,
+        instructions: str | None = None,
+    ) -> AsyncIterator[TakopiEvent]:
+        if resume.engine != ENGINE:
+            raise RuntimeError(
+                f"resume token is for engine {resume.engine!r}, not {ENGINE!r}"
+            )
+        factory = EventFactory(ENGINE)
+        yield factory.started(
+            resume,
+            title="OpenCode compact",
+            meta={"compact": {"mode": "native_api", "true_compaction": True}},
+        )
+        try:
+            client = self._resolve_compact_client()
+            has_custom_client = self.compact_http_client is not None
+            base = "" if has_custom_client else self._resolve_compact_base_url()
+            await client.post(f"{base}/api/session/{resume.value}/compact", json={})
+            if self.compact_wait:
+                await client.post(f"{base}/api/session/{resume.value}/wait", json={})
+            yield factory.completed_ok(
+                answer="OpenCode compaction requested.",
+                resume=resume,
+            )
+        except Exception as exc:  # noqa: BLE001
+            yield factory.completed(
+                ok=False,
+                answer="",
+                resume=resume,
+                error=str(exc),
+            )
+
+    def _resolve_compact_base_url(self) -> str:
+        import os
+
+        return (
+            os.environ.get("OPENCODE_API_URL")
+            or self.compact_api_base_url
+            or "http://127.0.0.1:4096"
+        )
+
+    def _resolve_compact_client(self) -> Any:
+        if self.compact_http_client is not None:
+            return self.compact_http_client
+        import httpx
+
+        return httpx.AsyncClient(base_url=self._resolve_compact_base_url())
 
     def command(self) -> str:
         import sys

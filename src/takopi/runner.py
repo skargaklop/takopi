@@ -13,6 +13,7 @@ from weakref import WeakValueDictionary
 import anyio
 
 from .logging import get_logger, log_pipeline
+from .compact import COMPACT_NONE, CompactSupport, CompactUnsupportedError
 from .model import (
     Action,
     ActionEvent,
@@ -96,6 +97,18 @@ class BaseRunner(SessionLockMixin):
         self, prompt: str, resume: ResumeToken | None
     ) -> AsyncIterator[TakopiEvent]:
         return self.run_locked(prompt, resume)
+
+    def compact_support(self) -> CompactSupport:
+        return COMPACT_NONE
+
+    async def compact(
+        self,
+        resume: ResumeToken,
+        instructions: str | None = None,
+    ) -> AsyncIterator[TakopiEvent]:
+        if False:
+            yield  # pragma: no cover
+        raise CompactUnsupportedError(f"{self.engine} does not support compact")
 
     async def run_locked(
         self, prompt: str, resume: ResumeToken | None
@@ -709,6 +722,14 @@ class Runner(Protocol):
         self,
         prompt: str,
         resume: ResumeToken | None,
+    ) -> AsyncIterator[TakopiEvent]: ...
+
+    def compact_support(self) -> CompactSupport: ...
+
+    def compact(
+        self,
+        resume: ResumeToken,
+        instructions: str | None = None,
     ) -> AsyncIterator[TakopiEvent]: ...
 
 

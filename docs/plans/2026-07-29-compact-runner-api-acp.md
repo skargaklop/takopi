@@ -2,9 +2,9 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Add `/compact [instructions]` to Takopi across `codex`, `claude`, `opencode`, `pi`, `omp`, `grok`, and `agy`, and support long prompts sent as several consecutive Telegram messages while preserving runner event order, resume-token reuse, and per-session serialization.
+**Goal:** Add `/compact [instructions]` to Takopi across `codex`, `claude`, `opencode`, `pi`, `omp`, `grok`, and `agy`, while preserving runner event order, resume-token reuse, and per-session serialization. Long-prompt Telegram batching is already implemented in the separate `docs/plans/2026-08-01-telegram-multi-message-input.md` plan and is no longer part of this plan's remaining scope.
 
-**Architecture:** Add a core compact capability model in `src/takopi/compact.py`, expose optional `compact_support()` and `compact(...)` runner methods, and route the Telegram `/compact` command through the same command/backend shape Takopi exposes via `takopi.api`. Add a Telegram-side `PromptBatcher` before batchable prompt/compact dispatch so several consecutive text messages from the same chat/topic/sender/reply scope are assembled into one prompt after a configurable quiet window. Slash-capable runners delegate to `run("/compact ...", resume)`, OpenCode uses its documented native HTTP compact endpoint, ACP runners use a minimal JSON-RPC stdio client only after the agent advertises `compact`, and `agy` is explicitly handoff-only rather than true compaction.
+**Architecture:** Add a core compact capability model in `src/takopi/compact.py`, expose optional `compact_support()` and `compact(...)` runner methods, and route the Telegram `/compact` command through the same command/backend shape Takopi exposes via `takopi.api`. Slash-capable runners delegate to `run("/compact ...", resume)`, OpenCode uses its documented native HTTP compact endpoint, ACP runners use a minimal JSON-RPC stdio client only after the agent advertises `compact`, and `agy` is explicitly handoff-only rather than true compaction. Telegram multi-message prompt assembly already lives in the separate batching plan, so this document should not reintroduce that work.
 
 **Tech Stack:** Python 3.14, anyio, msgspec, httpx, pytest, pytest-cov, ruff, Takopi `CommandContext`/`CommandResult`, Takopi `ThreadScheduler`, ACP JSON-RPC over stdio.
 
@@ -12,15 +12,9 @@
 
 ```text
 User sends /compact [instructions]
-or sends a long prompt as several Telegram messages
         |
         v
 Telegram route_message()
-        |
-        +-- batchable text/compact prompt -> PromptBatcher quiet window
-        |                                      |
-        |                                      v
-        |                                one assembled text
         |
         v
 Telegram command parser -> built-in CommandBackend-compatible CompactCommand
@@ -50,6 +44,22 @@ Existing per-ResumeToken queue/session lock
 StartedEvent -> 0..N ActionEvent -> CompletedEvent(last)
 completed.resume == started.resume
 ```
+
+**Scope update:** long-prompt batching is already shipped and tested in `docs/plans/2026-08-01-telegram-multi-message-input.md`. Keep this document focused on compact runner support and the cleanup items listed below.
+
+## Cleanup Candidates To Review
+
+These look like local scratch or temporary artifacts and should be removed only after verifying any references first:
+
+- `scripts/_scan_mojibake.py`
+- `docs/plans/2026-08-01-cancel-scope-shutdown-fix.md`
+
+Keep generated caches in place:
+
+- `.pytest_cache/`
+- `.pytest-tmp-codex/`
+- `.ruff_cache/`
+- `.uv-cache/`
 
 ---
 
@@ -1754,9 +1764,9 @@ Expected final state:
 8. `feat: add acp compact support`
 9. `test: cover telegram compact command`
 10. `feat: add compact command dispatch`
-11. `test: cover telegram prompt batching`
-12. `feat: add telegram prompt batching`
-13. `docs: document compact command and prompt batching`
+11. `docs: mark long-prompt batching as complete in the separate batching plan`
+12. `cleanup: remove scratch artifacts after reference cleanup`
+13. `docs: finalize compact plan references`
 
 Only commit if the user explicitly asks for commits.
 
@@ -1777,3 +1787,5 @@ Only commit if the user explicitly asks for commits.
 - Grok Build ACP command: https://zed.dev/acp/agent/grok-build
 - Grok Build ACP support overview: https://x.ai/news/grok-build-cli
 - OMP ACP: https://github.com/can1357/oh-my-pi
+
+[[takopi-send: D:\Projects\takopi\docs\plans\2026-07-29-compact-runner-api-acp.md]]

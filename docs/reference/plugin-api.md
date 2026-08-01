@@ -34,6 +34,13 @@ dependencies = ["takopi>=0.14,<0.15"]
 | `BaseRunner` | Helper base class with resume locking |
 | `JsonlSubprocessRunner` | Helper for JSONL-streaming CLIs |
 | `EventFactory` | Helper for building takopi events |
+| `CompactRunner` | Protocol for runners that support compaction |
+| `CompactSupport` | Declares a runner's compaction capability (mode, instructions, true compaction) |
+| `COMPACT_NONE` | Sentinel `CompactSupport` for runners without compaction |
+| `CompactUnsupportedError` | Raised when a runner cannot compact |
+| `SlashCompactMixin` | Mixin: delegates compact to `run("/compact …")` |
+| `AcpCompactMixin` | Mixin: compacts via ACP `session/prompt` |
+| `handoff_prompt` | Builds a handoff-summary prompt (not real compaction) |
 
 ### Transport backends
 
@@ -132,6 +139,22 @@ Runners own the resume format:
 - `format_resume(token)` returns a command line users can paste
 - `extract_resume(text)` parses resume tokens from user text
 - `is_resume_line(line)` lets Takopi strip resume lines before running
+
+### Compaction
+
+Runners MAY implement compaction to reduce session context:
+
+```py
+class MyRunner(SlashCompactMixin, ResumeTokenMixin, JsonlSubprocessRunner):
+    compact_accepts_instructions = True  # or False
+```
+
+- `compact_support()` returns a `CompactSupport` describing the mode.
+- `compact(resume, instructions)` yields `TakopiEvent` following the same started→completed invariant as `run()`.
+- Use `SlashCompactMixin` for runners that support `/compact` as a slash command (claude, pi, codex).
+- Use `AcpCompactMixin` for runners that compact via ACP `session/prompt` (grok, omp). Override `create_acp_client()`.
+- For handoff-only runners (agy), implement `compact_support()` and `compact()` manually using `handoff_prompt()`.
+- `get_compact_support(runner)` safely returns `COMPACT_NONE` for runners without compaction.
 
 ---
 

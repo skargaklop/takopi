@@ -15,6 +15,7 @@ from ..config_watch import ConfigReload, watch_config as watch_config_changes
 from ..commands import list_command_ids
 from ..directives import DirectiveError
 from ..logging import get_logger
+from ..compact import get_compact_support, warn_if_dropping_instructions
 from ..model import EngineId, ResumeToken
 from ..runners.run_options import (
     EngineRunOptions,
@@ -242,6 +243,86 @@ async def _send_startup(cfg: TelegramBridgeConfig) -> None:
         logger.info("startup.sent", chat_id=cfg.chat_id)
 
 
+async def _handle_compact_command(
+    instructions: str | None,
+    *,
+    cfg: TelegramBridgeConfig,
+    msg: TelegramIncomingMessage,
+    reply: Callable[..., Awaitable[None]],
+    scheduler: ThreadScheduler,
+    resume_resolver: ResumeResolver,
+    topic_store: TopicStateStore | None,
+    chat_session_store: ChatSessionStore | None,
+    topic_key: tuple[int, int] | None,
+    chat_session_key: tuple[int, int | None] | None,
+    reply_id: int | None,
+    running_tasks: Mapping[MessageRef, object],
+) -> None:
+    """Resolve an existing session and enqueue a compact job on the scheduler."""
+    chat_id = msg.chat_id
+    user_msg_id = msg.message_id
+    engine = cfg.runtime.resolve_engine(engine_override=None, context=None)
+
+    resume_decision = await resume_resolver.resolve(
+        resume_token=None,
+        reply_id=reply_id,
+        chat_id=chat_id,
+        user_msg_id=user_msg_id,
+        thread_id=msg.thread_id,
+        chat_session_key=chat_session_key,
+        topic_key=topic_key,
+        engine_for_session=engine,
+        prompt_text="",
+        user_resume=None,
+        bare_resume_id=None,
+        reply_resume=None,
+    )
+    resume_token = resume_decision.resume_token
+    if resume_token is None:
+        await reply(
+            text=(
+                "no active session to compact.\n"
+                "reply to a Takopi progress/final message, "
+                "or send a normal prompt first."
+            )
+        )
+        return
+
+    resolved = cfg.runtime.resolve_runner(
+        resume_token=resume_token,
+        engine_override=resume_token.engine,
+    )
+    runner = resolved.runner
+    support = get_compact_support(runner)
+
+    if support.mode == "none":
+        await reply(text=f"{resume_token.engine} does not support compact.")
+        return
+
+    final_instructions = instructions
+    if final_instructions and not support.accepts_instructions:
+        warning = warn_if_dropping_instructions(resume_token.engine, final_instructions)
+        if warning:
+            await reply(text=warning)
+        final_instructions = None
+
+    job = ThreadJob(
+        chat_id=chat_id,
+        user_msg_id=user_msg_id,
+        text="[compact]",
+        resume_token=resume_token,
+        context=None,
+        thread_id=msg.thread_id,
+        session_key=chat_session_key,
+        progress_ref=None,
+        plan=False,
+        goal=None,
+        kind="compact",
+        compact_instructions=final_instructions,
+    )
+    await scheduler.enqueue(job)
+
+
 def _dispatch_builtin_command(
     *,
     ctx: TelegramCommandContext,
@@ -442,6 +523,15 @@ def _dispatch_builtin_command(
         )
         task_group.start_soon(handler)
         return True
+    if command_id == "compact":
+        if ctx.compact_callback is not None:
+            instructions = args_text.strip() or None
+            task_group.start_soon(ctx.compact_callback, instructions)
+        else:
+            task_group.start_soon(
+                partial(reply, text="compact is unavailable for this transport.")
+            )
+        return True
 
     return False
 
@@ -559,6 +649,7 @@ class TelegramCommandContext:
     task_group: TaskGroup
     scheduler: ThreadScheduler | None = None
     running_tasks: Mapping[MessageRef, object] | None = None
+    compact_callback: Callable[[str | None], Awaitable[None]] | None = None
 
 
 def _classify_message(
@@ -1675,7 +1766,21 @@ async def run_main_loop(
                     send_document=cfg.bot.send_document,
                 )
 
+            async def run_compact_job(job: ThreadJob) -> None:
+                """Execute a compact job: resolve runner, call compact(), handle events."""
+                entry = cfg.runtime.resolve_runner(
+                    resume_token=job.resume_token,
+                    engine_override=job.resume_token.engine,
+                )
+                runner = entry.runner
+                instructions = job.compact_instructions
+                async for _event in runner.compact(job.resume_token, instructions):
+                    pass  # events handled by the progress/render layer in a full impl
+
             async def run_thread_job(job: ThreadJob) -> None:
+                if job.kind == "compact":
+                    await run_compact_job(job)
+                    return
                 await run_job(
                     cast(int, job.chat_id),
                     cast(int, job.user_msg_id),
@@ -2321,6 +2426,20 @@ async def run_main_loop(
                         task_group=tg,
                         scheduler=scheduler,
                         running_tasks=state.running_tasks,
+                        compact_callback=partial(
+                            _handle_compact_command,
+                            cfg=cfg,
+                            msg=msg,
+                            reply=reply,
+                            scheduler=scheduler,
+                            resume_resolver=resume_resolver,
+                            topic_store=state.topic_store,
+                            chat_session_store=state.chat_session_store,
+                            topic_key=topic_key,
+                            chat_session_key=chat_session_key,
+                            reply_id=reply_id,
+                            running_tasks=state.running_tasks,
+                        ),
                     ),
                     command_id=command_id,
                 ):

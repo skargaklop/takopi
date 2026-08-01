@@ -4,8 +4,9 @@
 
 ### features
 
+- runner compaction protocol: runners MAY implement `compact_support()` and `compact()` to participate in `/compact`. Five modes: `slash_prompt` (claude, pi, codex), `native_api` (opencode), `acp` (grok, omp), `handoff_only` (agy), `none`. Compact jobs serialize on the same `ThreadScheduler` as prompt jobs. See [specification §5.7](reference/specification.md#57-runner-compaction-protocol-may).
 - show a `plan` or `goal` mode badge in the Telegram message footer, preceding the `ctx:` line, so active plan/goal runs are visible at a glance.
-- `[logging]` config section for persistent log output: `level`, `file`, and `format` keys in `takopi.toml` set the log level, file destination, and output format (console/json). Env vars (`TAKOPI_LOG_*`) still override; `--debug` overrides both.
+- `[logging]` config section for persistent log output: `level`, `file`, and `format` keys in `takopi.toml` set the log level, file destination, and output format (console/json). Env vars (`TAKOPI_LOG_*`) still override; `--debug` overrides both. Relative log file paths resolve against `~/.takopi/`.
 
 ### changes
 

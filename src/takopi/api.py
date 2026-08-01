@@ -3,6 +3,16 @@
 from __future__ import annotations
 
 from .backends import EngineBackend, EngineConfig, SetupIssue
+from .compact import (
+    COMPACT_NONE,
+    CompactMode,
+    CompactRunner,
+    CompactSupport,
+    CompactUnsupportedError,
+    compact_prompt,
+    get_compact_support,
+    handoff_prompt,
+)
 from .commands import (
     CommandBackend,
     CommandContext,
@@ -28,6 +38,8 @@ from .presenter import Presenter
 from .progress import ActionState, ProgressState, ProgressTracker
 from .router import RunnerUnavailableError
 from .runner import BaseRunner, JsonlSubprocessRunner, Runner
+from .runners._acp import AcpCompactMixin
+from .runners._compact_mixin import SlashCompactMixin
 from .runner_bridge import (
     ExecBridgeConfig,
     IncomingMessage,
@@ -56,6 +68,14 @@ __all__ = [
     "Action",
     "ActionEvent",
     "BaseRunner",
+    "COMPACT_NONE",
+    "CompactMode",
+    "CompactRunner",
+    "CompactSupport",
+    "CompactUnsupportedError",
+    "compact_prompt",
+    "get_compact_support",
+    "handoff_prompt",
     "CompletedEvent",
     "ConfigError",
     "CommandBackend",
@@ -75,6 +95,7 @@ __all__ = [
     "ProgressState",
     "ProgressTracker",
     "ActionState",
+    "AcpCompactMixin",
     "RenderedMessage",
     "ResumeToken",
     "RunMode",
@@ -90,6 +111,7 @@ __all__ = [
     "SendOptions",
     "SetupIssue",
     "SetupResult",
+    "SlashCompactMixin",
     "StartedEvent",
     "TAKOPI_PLUGIN_API_VERSION",
     "Transport",

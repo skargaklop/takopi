@@ -20,6 +20,7 @@ from ..events import EventFactory
 from ..logging import get_logger, log_pipeline
 from ..model import CompletedEvent, EngineId, ResumeToken, TakopiEvent
 from ..runner import BaseRunner, ResumeTokenMixin, Runner
+from ..compact import CompactSupport, handoff_prompt
 from ..utils.paths import get_run_base_dir
 from ..utils.streams import iter_bytes_lines
 from ..utils.subprocess import manage_subprocess
@@ -98,6 +99,24 @@ class AgyRunner(ResumeTokenMixin, BaseRunner):
 
     def is_resume_line(self, line: str) -> bool:
         return bool(_RESUME_LINE_RE.match(line))
+
+
+    def compact_support(self) -> CompactSupport:
+        return CompactSupport(
+            mode="handoff_only",
+            accepts_instructions=True,
+            true_compaction=False,
+            note="Antigravity handoff summary only; not real compaction",
+        )
+
+    async def compact(
+        self,
+        resume: ResumeToken,
+        instructions: str | None = None,
+    ) -> AsyncIterator[TakopiEvent]:
+        prompt = handoff_prompt(instructions)
+        async for event in self.run(prompt, resume):
+            yield event
 
     def command(self) -> str:
         return self.agy_cmd

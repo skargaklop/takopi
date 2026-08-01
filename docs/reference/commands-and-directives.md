@@ -71,6 +71,7 @@ This line is parsed from replies and takes precedence over new directives.
 | `/plan` | Show sticky plan mode; `/plan on` \| `off` \| `clear` for chat/topic scope. Free-form `/plan <prompt>` (optionally with `/engine`) starts a **plan-mode agent run**. |
 | `/goal` | Bare `/goal` shows help. `/goal <condition>` starts a **goal-mode agent run**. |
 | `/queue` | Show FIFO queue depth and previews for the active thread (reply to progress/final if needed). |
+| `/compact` | Compact the current session's context. Optional free-form text after `/compact` passes instructions to the compactor (e.g. `/compact keep test plan`). Reply to a progress/final message or use in a chat/topic with an active session. Engines without native compact get a **handoff summary** instead (not true compaction). |
 | `/file put <path>` | Upload a document into the repo/worktree (requires `transports.telegram.files.enabled`). |
 | `/file get <path>` | Fetch a file or directory back into Telegram. |
 

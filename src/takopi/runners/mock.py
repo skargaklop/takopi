@@ -16,6 +16,7 @@ from ..model import (
     TakopiEvent,
 )
 from ..runner import ResumeTokenMixin, Runner, SessionLockMixin
+from ..compact import COMPACT_NONE, CompactSupport, CompactUnsupportedError
 
 ENGINE: EngineId = "mock"
 
@@ -119,6 +120,19 @@ class MockRunner(SessionLockMixin, ResumeTokenMixin, Runner):
                 ok=True,
                 answer=self._answer,
             )
+
+
+    def compact_support(self) -> CompactSupport:
+        return COMPACT_NONE
+
+    async def compact(
+        self,
+        resume: ResumeToken,
+        instructions: str | None = None,
+    ) -> AsyncIterator[TakopiEvent]:
+        if False:
+            yield  # pragma: no cover
+        raise CompactUnsupportedError(f"{self.engine} does not support compact")
 
 
 class ScriptRunner(MockRunner):

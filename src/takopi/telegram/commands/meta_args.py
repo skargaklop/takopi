@@ -23,6 +23,7 @@ _PURE_META = frozenset(
         "trigger",
         "model",
         "reasoning",
+        "compact",
     }
 )
 

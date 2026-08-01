@@ -14,6 +14,7 @@ from ..events import EventFactory
 from ..logging import get_logger
 from ..model import Action, ActionKind, EngineId, ResumeToken, TakopiEvent
 from ..runner import JsonlSubprocessRunner, ResumeTokenMixin, Runner
+from ._compact_mixin import SlashCompactMixin
 from .modes import effective_prompt, run_modes
 from .run_options import get_run_options
 from ..schemas import claude as claude_schema
@@ -283,7 +284,8 @@ def translate_claude_event(
 
 
 @dataclass(slots=True)
-class ClaudeRunner(ResumeTokenMixin, JsonlSubprocessRunner):
+class ClaudeRunner(SlashCompactMixin, ResumeTokenMixin, JsonlSubprocessRunner):
+    compact_accepts_instructions = True
     engine: EngineId = ENGINE
     resume_re: re.Pattern[str] = _RESUME_RE
 

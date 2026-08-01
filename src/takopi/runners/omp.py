@@ -12,6 +12,7 @@ from ..model import ActionEvent, CompletedEvent, EngineId, ResumeToken, StartedE
 from ..runner import Runner
 from .modes import effective_prompt, run_modes
 from .pi import PiRunner, PiStreamState, pi_schema
+from ._acp import AcpCompactMixin
 from .run_options import get_run_options
 
 ENGINE: EngineId = "omp"
@@ -59,7 +60,7 @@ def _unquote_token(token: str) -> str:
     return token
 
 
-class OmpRunner(PiRunner):
+class OmpRunner(AcpCompactMixin, PiRunner):
     engine: EngineId = ENGINE
     session_title: str = "omp"
     resume_re: re.Pattern[str] = _RESUME_RE

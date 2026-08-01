@@ -80,6 +80,7 @@ def build_bot_commands(
         ("plan", "sticky plan mode on/off"),
         ("goal", "help for goal mode"),
         ("queue", "show thread job queue"),
+        ("compact", "compact current session"),
     ]:
         if cmd in seen:
             continue

@@ -263,6 +263,49 @@ New thread rule (`resume is None`):
 * The runner MUST NOT spawn unbounded background tasks per event.
 * If the consumer stops iterating early (cancel/break/exception), the runner MUST abort the run best-effort and release any held locks/resources.
 
+### 5.7 Runner compaction protocol (MAY)
+
+Runners MAY implement compaction to reduce context size for long-running sessions:
+
+```python
+def compact_support(self) -> CompactSupport: ...
+
+async def compact(
+    self,
+    resume: ResumeToken,
+    instructions: str | None = None,
+) -> AsyncIterator[TakopiEvent]: ...
+```
+
+`CompactSupport` declares the runner's compaction capability:
+
+```python
+@dataclass(frozen=True, slots=True)
+class CompactSupport:
+    mode: Literal["slash_prompt", "native_api", "acp", "handoff_only", "none"]
+    accepts_instructions: bool
+    true_compaction: bool
+    note: str | None = None
+```
+
+Compaction modes:
+
+| Mode | Description | Examples |
+|------|-------------|----------|
+| `slash_prompt` | Delegates to `run("/compact [instructions]", resume)` | claude, pi, codex |
+| `native_api` | Calls the engine's HTTP API directly | opencode |
+| `acp` | Uses ACP `session/prompt` after capability-gating | grok, omp |
+| `handoff_only` | Generates a handoff summary (not real compaction) | agy |
+| `none` | Compaction not supported | mock, third-party without impl |
+
+Requirements:
+
+* `compact()` MUST receive an existing `ResumeToken`. It MUST NOT create a new session.
+* If `compact()` emits `StartedEvent`, it MUST emit exactly one final `CompletedEvent`, and `CompletedEvent.resume` MUST equal `StartedEvent.resume` (same invariant as `run()`).
+* `compact()` jobs are enqueued on the same `ThreadScheduler` as prompt jobs, so they serialize with active runs on the same `ThreadKey`.
+* If `accepts_instructions` is `False`, the bridge MUST warn the user and drop instructions before calling `compact()`.
+* `handoff_only` mode MUST NOT claim that real compaction occurred.
+
 ## 6. Bridge (Telegram orchestration)
 
 ### 6.1 Responsibilities (MUST)
@@ -480,6 +523,12 @@ The lock file MUST contain JSON with:
 The lock file SHOULD be removed on clean shutdown. Stale locks from crashed processes are handled by the acquisition rules above.
 
 ## 11. Changelog
+
+### v0.24.0 (2026-08-01)
+
+- Add runner compaction protocol (§5.7): `compact_support()` and `compact()` with modes `slash_prompt`, `native_api`, `acp`, `handoff_only`, `none`.
+- Compact jobs serialize on the same `ThreadScheduler` as prompt jobs.
+- Add `/compact` bot command for session context compaction.
 
 ### v0.23.4 (2026-05-25)
 

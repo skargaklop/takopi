@@ -21,6 +21,7 @@ from ..logging import get_logger
 from ..model import ActionPhase, EngineId, ResumeToken, TakopiEvent
 from ..runner import BaseRunner, JsonlSubprocessRunner, ResumeTokenMixin, Runner
 from .modes import effective_prompt, run_modes
+from ._compact_mixin import SlashCompactMixin
 from .run_options import get_run_options
 from ..schemas import codex as codex_schema
 from ..utils.paths import get_run_base_dir, relativize_command
@@ -456,7 +457,8 @@ class CodexRunState:
     turn_index: int = 0
 
 
-class CodexRunner(ResumeTokenMixin, JsonlSubprocessRunner):
+class CodexRunner(SlashCompactMixin, ResumeTokenMixin, JsonlSubprocessRunner):
+    compact_accepts_instructions = False
     engine: EngineId = ENGINE
     resume_re = _RESUME_RE
     logger = logger
@@ -1307,7 +1309,8 @@ def _translate_app_notification(
     return []
 
 
-class AppServerCodexRunner(ResumeTokenMixin, BaseRunner):
+class AppServerCodexRunner(SlashCompactMixin, ResumeTokenMixin, BaseRunner):
+    compact_accepts_instructions = False
     engine: EngineId = ENGINE
     resume_re = _RESUME_RE
     logger = logger

@@ -28,6 +28,7 @@ from ..model import (
 )
 from ..runner import JsonlSubprocessRunner, ResumeTokenMixin, Runner
 from .modes import run_modes
+from ._compact_mixin import SlashCompactMixin
 from .run_options import get_run_options
 from ..schemas import pi as pi_schema
 from ..utils.paths import get_run_base_dir
@@ -277,7 +278,8 @@ def translate_pi_event(
             return out
 
 
-class PiRunner(ResumeTokenMixin, JsonlSubprocessRunner):
+class PiRunner(SlashCompactMixin, ResumeTokenMixin, JsonlSubprocessRunner):
+    compact_accepts_instructions = True
     engine: EngineId = ENGINE
     resume_re: re.Pattern[str] = _RESUME_RE
     session_title: str = "pi"
