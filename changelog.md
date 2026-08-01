@@ -5,6 +5,7 @@
 ### features
 
 - show a `plan` or `goal` mode badge in the Telegram message footer, preceding the `ctx:` line, so active plan/goal runs are visible at a glance.
+- `[logging]` config section for persistent log output: `level`, `file`, and `format` keys in `takopi.toml` set the log level, file destination, and output format (console/json). Env vars (`TAKOPI_LOG_*`) still override; `--debug` overrides both.
 
 ### changes
 

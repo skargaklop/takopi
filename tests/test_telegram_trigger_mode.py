@@ -136,3 +136,16 @@ def test_should_trigger_run_ignores_unknown_commands() -> None:
         command_ids=set(),
         reserved_chat_commands=set(RESERVED_CHAT_COMMANDS),
     )
+
+
+def test_should_trigger_run_uses_text_override_for_mentions() -> None:
+    runtime = _runtime()
+    msg = _msg("first chunk")
+    assert should_trigger_run(
+        msg,
+        bot_username="bot",
+        runtime=runtime,
+        command_ids=set(),
+        reserved_chat_commands=set(),
+        text_override="first chunk\n\nhello @bot",
+    )

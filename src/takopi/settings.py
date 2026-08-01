@@ -159,6 +159,11 @@ class TelegramTransportSettings(BaseModel):
     show_resume_line: bool = True
     forward_coalesce_s: float = Field(default=1.0, ge=0)
     media_group_debounce_s: float = Field(default=1.0, ge=0)
+    prompt_batch_enabled: bool = True
+    prompt_batch_debounce_s: float = Field(default=0.75, ge=0)
+    prompt_batch_max_messages: StrictInt = Field(default=8, ge=1)
+    prompt_batch_max_chars: StrictInt = Field(default=120_000, ge=1)
+    prompt_batch_separator: Literal["newline", "blank_line"] = "blank_line"
     topics: TelegramTopicsSettings = Field(default_factory=TelegramTopicsSettings)
     files: TelegramFilesSettings = Field(default_factory=TelegramFilesSettings)
 
@@ -185,6 +190,37 @@ class ProjectSettings(BaseModel):
     chat_id: ChatId | None = None
 
 
+
+class LoggingSettings(BaseModel):
+    level: str = "info"
+    file: str | None = None
+    format: str = "console"
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    @field_validator("level")
+    @classmethod
+    def _validate_level(cls, v: str) -> str:
+        allowed = {"debug", "info", "warning", "error"}
+        normalized = v.strip().lower()
+        if normalized not in allowed:
+            raise ValueError(
+                f"logging.level must be one of {', '.join(sorted(allowed))}, got {v!r}"
+            )
+        return normalized
+
+    @field_validator("format")
+    @classmethod
+    def _validate_format(cls, v: str) -> str:
+        allowed = {"console", "json"}
+        normalized = v.strip().lower()
+        if normalized not in allowed:
+            raise ValueError(
+                f"logging.format must be one of {', '.join(sorted(allowed))}, got {v!r}"
+            )
+        return normalized
+
+
 class TakopiSettings(BaseSettings):
     model_config = SettingsConfigDict(
         extra="allow",
@@ -202,6 +238,7 @@ class TakopiSettings(BaseSettings):
     transports: TransportsSettings
 
     plugins: PluginsSettings = Field(default_factory=PluginsSettings)
+    logging: LoggingSettings = Field(default_factory=LoggingSettings)
 
     @model_validator(mode="before")
     @classmethod

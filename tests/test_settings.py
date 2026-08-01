@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 from takopi.config import ConfigError, read_config
 from takopi.settings import (
@@ -12,6 +13,55 @@ from takopi.settings import (
     require_telegram,
     validate_settings_data,
 )
+
+
+def test_telegram_prompt_batch_defaults() -> None:
+    settings = TakopiSettings.model_validate(
+        {
+            "transport": "telegram",
+            "transports": {
+                "telegram": {"bot_token": "token", "chat_id": 123}
+            },
+        }
+    )
+
+    telegram = settings.transports.telegram
+    assert telegram is not None
+    assert telegram.prompt_batch_enabled is True
+    assert telegram.prompt_batch_debounce_s == 0.75
+    assert telegram.prompt_batch_max_messages == 8
+    assert telegram.prompt_batch_max_chars == 120_000
+    assert telegram.prompt_batch_separator == "blank_line"
+
+
+@pytest.mark.parametrize(
+    ("key", "value"),
+    [
+        ("prompt_batch_debounce_s", -0.1),
+        ("prompt_batch_max_messages", 0),
+        ("prompt_batch_max_chars", 0),
+        ("prompt_batch_separator", "comma"),
+    ],
+)
+def test_telegram_prompt_batch_invalid_values(
+    tmp_path: Path,
+    key: str,
+    value: object,
+) -> None:
+    data = {
+        "transport": "telegram",
+        "transports": {
+            "telegram": {
+                "bot_token": "token",
+                "chat_id": 123,
+                key: value,
+            }
+        },
+    }
+
+    with pytest.raises(ConfigError, match=key):
+        validate_settings_data(data, config_path=tmp_path / "takopi.toml")
+
 
 
 def test_load_settings_from_toml(tmp_path: Path) -> None:
@@ -270,3 +320,43 @@ def test_load_settings_without_telegram(tmp_path: Path) -> None:
     assert settings.transport_config("my-transport", config_path=config_path) == {
         "some_key": "value"
     }
+
+
+
+def test_logging_defaults() -> None:
+    settings = TakopiSettings.model_validate(
+        {"transport": "telegram", "transports": {"telegram": {"bot_token": "t", "chat_id": 1}}}
+    )
+    assert settings.logging.level == "info"
+    assert settings.logging.file is None
+    assert settings.logging.format == "console"
+
+
+def test_logging_from_config_file(tmp_path: Path) -> None:
+    config_path = tmp_path / "takopi.toml"
+    config_path.write_text(
+        'transport = "telegram"\n\n'
+        "[transports.telegram]\nbot_token = 't'\nchat_id = 1\n\n"
+        "[logging]\nlevel = 'debug'\nfile = 'takopi.log'\nformat = 'json'\n",
+        encoding="utf-8",
+    )
+    settings, _ = load_settings(config_path)
+    assert settings.logging.level == "debug"
+    assert settings.logging.file == "takopi.log"
+    assert settings.logging.format == "json"
+
+
+def test_logging_invalid_level_rejected() -> None:
+    with pytest.raises((ValidationError, ValueError)):
+        TakopiSettings.model_validate(
+            {"transport": "telegram", "transports": {"telegram": {"bot_token": "t", "chat_id": 1}},
+             "logging": {"level": "trace"}}
+        )
+
+
+def test_logging_invalid_format_rejected() -> None:
+    with pytest.raises((ValidationError, ValueError)):
+        TakopiSettings.model_validate(
+            {"transport": "telegram", "transports": {"telegram": {"bot_token": "t", "chat_id": 1}},
+             "logging": {"format": "xml"}}
+        )

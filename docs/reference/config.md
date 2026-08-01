@@ -49,6 +49,11 @@ If you expect to edit config while Takopi is running, set:
 | `allowed_user_ids` | int[] | `[]` | Allowed sender user ids. Empty disables sender filtering; when set, only these users can interact (including DMs). |
 | `message_overflow` | `"split"`\|`"trim"` | `"split"` | How to handle long final responses. |
 | `forward_coalesce_s` | float | `1.0` | Quiet window for combining a prompt with immediately-following forwarded messages; set `0` to disable. |
+| `prompt_batch_enabled` | bool | `true` | Combine qualifying consecutive text messages into one prompt. |
+| `prompt_batch_debounce_s` | float | `0.75` | Quiet window for collecting prompt chunks. Set `0` to disable. |
+| `prompt_batch_max_messages` | int | `8` | Maximum chunks in one prompt batch before immediate flush. |
+| `prompt_batch_max_chars` | int | `120000` | Maximum assembled prompt size. If adding the next message would exceed it, Takopi flushes the current batch first and starts a new batch with the new message. |
+| `prompt_batch_separator` | `"newline"`\|`"blank_line"` | `"blank_line"` | Separator inserted between text chunks. |
 | `voice_transcription` | bool | `false` | Enable voice note transcription. |
 | `voice_max_bytes` | int | `10485760` | Max voice note size (bytes). |
 | `voice_transcription_model` | string | `"gpt-4o-mini-transcribe"` | OpenAI transcription model name. |
@@ -130,6 +135,27 @@ File size limits (not configurable):
 
 Legacy config note: top-level `bot_token` / `chat_id` are auto-migrated into `[transports.telegram]` on startup.
 
+## `logging`
+
+Control takopi's log output from the config file. Environment variables (`TAKOPI_LOG_LEVEL`, `TAKOPI_LOG_FILE`, `TAKOPI_LOG_FORMAT`) override config-file values; the `--debug` CLI flag overrides both.
+
+=== "toml"
+
+    ```toml
+    [logging]
+    level = "debug"
+    file = "takopi.log"
+    format = "json"
+    ```
+
+| Key | Type | Default | Notes |
+|-----|------|---------|-------|
+| `level` | `"debug"` \| `"info"` \| `"warning"` \| `"error"` | `"info"` | Minimum log level. |
+| `file` | string\|null | `null` | Append logs to this file (relative to CWD). |
+| `format` | `"console"` \| `"json"` | `"console"` | Output format. `console` uses colored text; `json` emits structured JSON. |
+
+The `--debug` CLI flag is equivalent to `level = "debug"` + `file = "debug.log"`.
+
 ## Plugins
 
 ### `plugins.enabled`
@@ -147,7 +173,7 @@ Legacy config note: top-level `bot_token` / `chat_id` are auto-migrated into `[t
     enabled = ["takopi-transport-slack", "takopi-engine-acme"]
     ```
 
-- `enabled = []` (default) means “load all installed plugins”.
+- `enabled = []` (default) means "load all installed plugins".
 - If non-empty, only distributions with matching names are visible (case-insensitive).
 
 ### `plugins.<id>`

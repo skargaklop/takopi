@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import os
+import signal
 from pathlib import Path
+from collections.abc import Callable
 from typing import Literal
 
 import anyio
@@ -80,6 +82,50 @@ def _build_startup_message(
     )
 
 
+def _install_sigint_cancel_handler(scope: anyio.CancelScope) -> Callable[[], None]:
+    """Install a SIGINT handler that cancels the given scope instead of raising.
+
+    Returns a restore callable that reinstalls the previous handler. This lets
+    Ctrl+C propagate as a cooperative cancellation through the live event loop,
+    so every ``finally`` block (subprocess termination, transport ``close()``)
+    runs before the loop exits — instead of the asyncio loop being torn down
+    by a raw ``KeyboardInterrupt`` that skips async cleanup.
+    """
+    previous = signal.getsignal(signal.SIGINT)
+
+    def _handler(*_args: object) -> None:
+        scope.cancel()
+
+    signal.signal(signal.SIGINT, _handler)
+
+    def restore() -> None:
+        signal.signal(signal.SIGINT, previous)
+
+    return restore
+
+
+async def _run_loop_with_sigint(
+    cfg: TelegramBridgeConfig,
+    *,
+    watch_config: bool | None,
+    default_engine_override: str | None,
+    transport_id: str,
+    transport_config: TelegramTransportSettings,
+) -> None:
+    """Run the Telegram loop under the task group's own cancellation scope."""
+    async with anyio.create_task_group() as task_group:
+        restore = _install_sigint_cancel_handler(task_group.cancel_scope)
+        try:
+            await run_main_loop(
+                cfg,
+                watch_config=watch_config,
+                default_engine_override=default_engine_override,
+                transport_id=transport_id,
+                transport_config=transport_config,
+            )
+        finally:
+            restore()
+
 
 class TelegramBackend(TransportBackend):
     id = "telegram"
@@ -143,18 +189,13 @@ class TelegramBackend(TransportBackend):
             voice_transcription_api_key=settings.voice_transcription_api_key,
             forward_coalesce_s=settings.forward_coalesce_s,
             media_group_debounce_s=settings.media_group_debounce_s,
-            prompt_batch_enabled=settings.prompt_batch_enabled,
-            prompt_batch_debounce_s=settings.prompt_batch_debounce_s,
-            prompt_batch_max_messages=int(settings.prompt_batch_max_messages),
-            prompt_batch_max_chars=int(settings.prompt_batch_max_chars),
-            prompt_batch_separator=settings.prompt_batch_separator,
             allowed_user_ids=tuple(settings.allowed_user_ids),
             topics=settings.topics,
             files=settings.files,
         )
 
         async def run_loop() -> None:
-            await run_main_loop(
+            await _run_loop_with_sigint(
                 cfg,
                 watch_config=runtime.watch_config,
                 default_engine_override=default_engine_override,

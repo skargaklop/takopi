@@ -64,7 +64,7 @@ Telegram’s bot privacy mode stops bots from seeing every message by default, b
 **admins always receive all messages** in groups. If you promote takopi to admin,
 Telegram will deliver every update even when privacy mode is enabled.
 
-To restore “only respond when invoked” behavior, use trigger mode:
+To restore "only respond when invoked" behavior, use trigger mode:
 
 - `all` (default): any message can start a run (subject to ignore rules).
 - `mentions`: only start when explicitly invoked.
@@ -120,6 +120,49 @@ Configuration (under `[transports.telegram]`):
     ```toml
     forward_coalesce_s = 1.0 # set 0 to disable the delay
     ```
+
+## Long user input across several messages
+
+When users send several text messages within `prompt_batch_debounce_s`, Takopi
+can treat them as one prompt. The messages must come from the same sender,
+chat, topic/thread, and reply target. The assembled prompt then uses the normal
+directive parsing, trigger checks, session resume, and queue behavior.
+
+This is independent from `/compact`; it applies to all prompt workflows:
+ordinary prompts, engine directives (`/codex ...`), project directives,
+`/plan <prompt>` and `/goal <condition>` runs, plugin commands with long
+argument bodies, replies to active sessions, chat-session auto-resume, topics,
+and stateless workflows.
+
+Control commands (`/cancel`, `/new`, `/ctx`, `/agent`, `/model`, `/reasoning`,
+`/trigger`, `/queue`, `/file`, `/topic`), bare `/plan` / `/goal`, voice notes,
+documents, media albums, and forwarded-only messages are never batched.
+
+Configuration (under `[transports.telegram]`):
+
+=== "takopi config"
+
+    ```sh
+    takopi config set transports.telegram.prompt_batch_enabled true
+    takopi config set transports.telegram.prompt_batch_debounce_s 0.75
+    ```
+
+=== "toml"
+
+    ```toml
+    prompt_batch_enabled = true
+    prompt_batch_debounce_s = 0.75 # set 0 to disable
+    prompt_batch_max_messages = 8
+    prompt_batch_max_chars = 120000
+    prompt_batch_separator = "blank_line" # or "newline"
+    ```
+
+`prompt_batch_max_chars` is an upper bound on the assembled prompt. If adding
+the next message would exceed it, Takopi flushes the current batch first and
+starts a new prompt batch with the new message.
+
+See [Long Telegram prompts](../how-to/long-telegram-prompts.md) for usage
+examples.
 
 ## Chat sessions (optional)
 

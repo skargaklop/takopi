@@ -63,8 +63,24 @@ from tests.telegram_fakes import (
 CODEX_ENGINE = "codex"
 FAST_FORWARD_COALESCE_S = 0.0
 FAST_MEDIA_GROUP_DEBOUNCE_S = 0.0
+FAST_PROMPT_BATCH_S = 0.02
 BATCH_MEDIA_GROUP_DEBOUNCE_S = 0.05
 DEBOUNCE_FORWARD_COALESCE_S = 0.05
+
+
+def _msg(message_id: int, text: str, **kwargs) -> TelegramIncomingMessage:
+    return TelegramIncomingMessage(
+        transport="telegram",
+        chat_id=kwargs.pop("chat_id", 123),
+        message_id=message_id,
+        text=text,
+        reply_to_message_id=kwargs.pop("reply_to_message_id", None),
+        reply_to_text=kwargs.pop("reply_to_text", None),
+        sender_id=kwargs.pop("sender_id", 123),
+        thread_id=kwargs.pop("thread_id", None),
+        chat_type=kwargs.pop("chat_type", "private"),
+        **kwargs,
+    )
 
 
 class _NoopTaskGroup:
@@ -2001,6 +2017,9 @@ async def test_run_main_loop_routes_reply_to_running_resume() -> None:
         exec_cfg=exec_cfg,
         forward_coalesce_s=FAST_FORWARD_COALESCE_S,
         media_group_debounce_s=FAST_MEDIA_GROUP_DEBOUNCE_S,
+        # This test verifies immediate reply-to-running-task routing; disable
+        # prompt batching so the follow-up is not held by the quiet window.
+        prompt_batch_debounce_s=0.0,
     )
 
     async def poller(_cfg: TelegramBridgeConfig):

@@ -153,6 +153,11 @@ class TelegramBridgeConfig:
     voice_transcription_api_key: str | None = None
     forward_coalesce_s: float = 1.0
     media_group_debounce_s: float = 1.0
+    prompt_batch_enabled: bool = True
+    prompt_batch_debounce_s: float = 0.75
+    prompt_batch_max_messages: int = 8
+    prompt_batch_max_chars: int = 120_000
+    prompt_batch_separator: Literal["newline", "blank_line"] = "blank_line"
     allowed_user_ids: tuple[int, ...] = ()
     files: TelegramFilesSettings = field(default_factory=TelegramFilesSettings)
     chat_ids: tuple[int, ...] | None = None

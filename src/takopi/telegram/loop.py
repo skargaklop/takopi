@@ -88,6 +88,13 @@ from .engine_overrides import merge_overrides
 from .engine_defaults import resolve_engine_for_message
 from .topic_state import TopicStateStore, resolve_state_path
 from .trigger_mode import resolve_trigger_mode, should_trigger_run
+from .prompt_batch import (
+    PromptBatchPart,
+    PromptBatchSeparator,
+    PromptBatchSettings,
+    join_prompt_parts,
+    should_batch_text,
+)
 from .types import (
     TelegramCallbackQuery,
     TelegramIncomingMessage,
@@ -499,6 +506,23 @@ class _PendingPrompt:
 
 
 @dataclass(frozen=True, slots=True)
+class PromptBatchKey:
+    chat_id: int
+    thread_id: int | None
+    sender_id: int
+    reply_id: int | None
+    topic_key: tuple[int, int] | None
+    chat_session_key: tuple[int, int | None] | None
+
+
+@dataclass(slots=True)
+class PromptBatchState:
+    pending: _PendingPrompt
+    parts: list[PromptBatchPart]
+    token: int = 0
+
+
+@dataclass(frozen=True, slots=True)
 class TelegramMsgContext:
     chat_id: int
     thread_id: int | None
@@ -566,6 +590,7 @@ class TelegramLoopState:
     running_tasks: RunningTasks
     pending_prompts: dict[ForwardKey, _PendingPrompt]
     media_groups: dict[tuple[int, str], _MediaGroupState]
+    prompt_batches: dict[PromptBatchKey, PromptBatchState]
     command_ids: set[str]
     reserved_commands: set[str]
     reserved_chat_commands: set[str]
@@ -578,6 +603,11 @@ class TelegramLoopState:
     bot_username: str | None
     forward_coalesce_s: float
     media_group_debounce_s: float
+    prompt_batch_enabled: bool
+    prompt_batch_debounce_s: float
+    prompt_batch_max_messages: int
+    prompt_batch_max_chars: int
+    prompt_batch_separator: PromptBatchSeparator
     transport_id: str | None
     seen_update_ids: set[int]
     seen_update_order: deque[int]
@@ -788,6 +818,198 @@ class ForwardCoalescer:
             debounce_s=self._debounce_s,
         )
         await self._dispatch(pending)
+
+
+class PromptInputBatcher:
+    """Group consecutive qualifying Telegram text messages into one prompt.
+
+    Messages join a batch when they share chat, topic/thread, sender, reply
+    target, topic, and session scope, arrive inside the quiet window, and pass
+    :func:`should_batch_text`. One flush assembles exactly one
+    ``_PendingPrompt``; the existing dispatcher then decides what the assembled
+    prompt means (directives, resume, queue).
+
+    Debounce uses token invalidation instead of stored cancel scopes: a newer
+    schedule for the same key makes older debounce tasks no-ops, so no task
+    ever exits a cancel scope entered by another task.
+    """
+
+    def __init__(
+        self,
+        *,
+        task_group: TaskGroup,
+        debounce_s: float,
+        sleep: Callable[[float], Awaitable[None]],
+        dispatch: Callable[[_PendingPrompt], Awaitable[None]],
+        pending: dict[PromptBatchKey, PromptBatchState],
+        max_messages: int,
+        max_chars: int,
+        separator: PromptBatchSeparator,
+    ) -> None:
+        self._task_group = task_group
+        self._debounce_s = debounce_s
+        self._sleep = sleep
+        self._dispatch = dispatch
+        self._pending = pending
+        self._max_messages = max_messages
+        self._max_chars = max_chars
+        self._separator = separator
+
+    def key_for_message(
+        self,
+        msg: TelegramIncomingMessage,
+        *,
+        topic_key: tuple[int, int] | None,
+        chat_session_key: tuple[int, int | None] | None,
+    ) -> PromptBatchKey | None:
+        if msg.sender_id is None:
+            return None
+        return PromptBatchKey(
+            chat_id=msg.chat_id,
+            thread_id=msg.thread_id,
+            sender_id=msg.sender_id,
+            reply_id=msg.reply_to_message_id,
+            topic_key=topic_key,
+            chat_session_key=chat_session_key,
+        )
+
+    def key_for(self, pending: _PendingPrompt) -> PromptBatchKey | None:
+        msg = pending.msg
+        if msg.sender_id is None:
+            return None
+        if (
+            msg.document is not None
+            or msg.voice is not None
+            or msg.media_group_id is not None
+        ):
+            return None
+        return self.key_for_message(
+            msg,
+            topic_key=pending.topic_key,
+            chat_session_key=pending.chat_session_key,
+        )
+
+    def cancel(self, key: PromptBatchKey | None) -> None:
+        if key is None:
+            return
+        state = self._pending.pop(key, None)
+        if state is not None:
+            # Invalidate any in-flight debounce task for this state.
+            state.token += 1
+
+    def attach_forward(self, msg: TelegramIncomingMessage) -> bool:
+        """Attach a forwarded message to a pending batch, if any.
+
+        Forwarded content is kept separate from text chunks: it lands on the
+        pending prompt's ``forwards`` list and is joined by the existing
+        forward formatting in the dispatcher. Returns ``False`` when no batch
+        is pending for this message, so the caller can fall back to
+        :class:`ForwardCoalescer`.
+        """
+        if msg.sender_id is None:
+            return False
+        text = msg.text
+        if not text.strip():
+            return False
+        for key, state in list(self._pending.items()):
+            if (
+                key.chat_id == msg.chat_id
+                and key.thread_id == msg.thread_id
+                and key.sender_id == msg.sender_id
+            ):
+                state.pending.forwards.append((msg.message_id, text))
+                self._reschedule(key, state)
+                return True
+        return False
+
+    def schedule(self, pending: _PendingPrompt) -> bool:
+        key = self.key_for(pending)
+        if key is None:
+            return False
+        text = pending.text
+        settings = PromptBatchSettings(
+            enabled=self._debounce_s > 0,
+            max_messages=self._max_messages,
+            max_chars=self._max_chars,
+            separator=self._separator,
+        )
+        if not should_batch_text(text, settings=settings):
+            return False
+
+        part = PromptBatchPart(message_id=pending.msg.message_id, text=text)
+        state = self._pending.get(key)
+        if state is None:
+            state = PromptBatchState(pending=pending, parts=[part])
+            self._pending[key] = state
+            self._reschedule(key, state)
+            return True
+
+        if self._joined_len([*state.parts, part], self._separator) > self._max_chars:
+            # Flush the existing batch first, then start a new batch with the
+            # current chunk; the assembled prompt stays within max_chars.
+            self._pending.pop(key, None)
+            state.token += 1
+            self._task_group.start_soon(self._dispatch_state, state)
+            new_state = PromptBatchState(pending=pending, parts=[part])
+            self._pending[key] = new_state
+            self._reschedule(key, new_state)
+            return True
+
+        state.parts.append(part)
+        if len(state.parts) >= self._max_messages:
+            self._task_group.start_soon(self.flush, key)
+            return True
+        self._reschedule(key, state)
+        return True
+
+    @staticmethod
+    def _joined_len(parts: list[PromptBatchPart], separator: str) -> int:
+        sep_len = 1 if separator == "newline" else 2
+        return (
+            sum(len(part.text) for part in parts)
+            + sep_len * max(0, len(parts) - 1)
+        )
+
+    def _reschedule(self, key: PromptBatchKey, state: PromptBatchState) -> None:
+        state.token += 1
+        token = state.token
+        self._task_group.start_soon(self._debounce_flush, key, state, token)
+
+    async def _debounce_flush(
+        self,
+        key: PromptBatchKey,
+        state: PromptBatchState,
+        token: int,
+    ) -> None:
+        await self._sleep(self._debounce_s)
+        current = self._pending.get(key)
+        if current is not state or current.token != token:
+            return
+        await self.flush(key)
+
+    async def flush(self, key: PromptBatchKey) -> None:
+        state = self._pending.pop(key, None)
+        if state is None:
+            return
+        await self._dispatch_state(state)
+
+    async def _dispatch_state(self, state: PromptBatchState) -> None:
+        first = state.pending
+        assembled = join_prompt_parts(state.parts, separator=self._separator)
+        await self._dispatch(
+            _PendingPrompt(
+                msg=first.msg,
+                text=assembled,
+                ambient_context=first.ambient_context,
+                chat_project=first.chat_project,
+                topic_key=first.topic_key,
+                chat_session_key=first.chat_session_key,
+                reply_ref=first.reply_ref,
+                reply_id=first.reply_id,
+                is_voice_transcribed=first.is_voice_transcribed,
+                forwards=first.forwards,
+            )
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -1192,6 +1414,7 @@ async def run_main_loop(
         running_tasks={},
         pending_prompts={},
         media_groups={},
+        prompt_batches={},
         command_ids={
             command_id.lower()
             for command_id in list_command_ids(allowlist=cfg.runtime.allowlist)
@@ -1209,6 +1432,11 @@ async def run_main_loop(
         bot_username=None,
         forward_coalesce_s=max(0.0, float(cfg.forward_coalesce_s)),
         media_group_debounce_s=max(0.0, float(cfg.media_group_debounce_s)),
+        prompt_batch_enabled=bool(cfg.prompt_batch_enabled),
+        prompt_batch_debounce_s=max(0.0, float(cfg.prompt_batch_debounce_s)),
+        prompt_batch_max_messages=max(2, int(cfg.prompt_batch_max_messages)),
+        prompt_batch_max_chars=max(4096, int(cfg.prompt_batch_max_chars)),
+        prompt_batch_separator=cfg.prompt_batch_separator,
         transport_id=transport_id,
         seen_update_ids=set(),
         seen_update_order=deque(),
@@ -1761,6 +1989,108 @@ async def run_main_loop(
                     reply_id=pending.reply_id,
                 )
 
+            async def _dispatch_registered_command(
+                pending: _PendingPrompt,
+                *,
+                command_id: str,
+                args_text: str,
+            ) -> None:
+                """Dispatch a registered engine/plugin command with assembled text."""
+                msg = pending.msg
+                chat_id = msg.chat_id
+                overrides_thread_id = (
+                    pending.topic_key[1] if pending.topic_key is not None else None
+                )
+                engine_resolution = await resolve_engine_defaults(
+                    explicit_engine=None,
+                    context=pending.ambient_context,
+                    chat_id=chat_id,
+                    topic_key=pending.topic_key,
+                )
+                default_engine_override = (
+                    engine_resolution.engine
+                    if engine_resolution.source
+                    in {"directive", "topic_default", "chat_default"}
+                    else None
+                )
+                engine_overrides_resolver = partial(
+                    _resolve_engine_run_options,
+                    chat_id,
+                    overrides_thread_id,
+                    chat_prefs=state.chat_prefs,
+                    topic_store=state.topic_store,
+                )
+                await dispatch_command(
+                    cfg,
+                    msg,
+                    pending.text,
+                    command_id,
+                    args_text,
+                    state.running_tasks,
+                    scheduler,
+                    wrap_on_thread_known(
+                        scheduler.note_thread_known,
+                        pending.topic_key,
+                        pending.chat_session_key,
+                    ),
+                    pending.chat_session_key is not None
+                    or pending.topic_key is not None,
+                    default_engine_override,
+                    engine_overrides_resolver,
+                )
+
+            async def _dispatch_batched_prompt(pending: _PendingPrompt) -> None:
+                """Dispatch an assembled batch.
+
+                Command decisions happen on the joined text so plugin commands
+                and engine directives resolve after batching. Mentions trigger
+                mode is evaluated on the assembled text as well.
+                """
+                command_id, args_text = parse_slash_command(pending.text)
+                if command_id is not None and command_id not in state.reserved_commands:
+                    if command_id not in state.command_ids:
+                        refresh_commands()
+                    if command_id in state.command_ids:
+                        await _dispatch_registered_command(
+                            pending,
+                            command_id=command_id,
+                            args_text=args_text,
+                        )
+                        return
+
+                trigger_mode = await resolve_trigger_mode(
+                    chat_id=pending.msg.chat_id,
+                    thread_id=pending.msg.thread_id,
+                    chat_prefs=state.chat_prefs,
+                    topic_store=state.topic_store,
+                )
+                if trigger_mode == "mentions" and not should_trigger_run(
+                    pending.msg,
+                    bot_username=state.bot_username,
+                    runtime=cfg.runtime,
+                    command_ids=state.command_ids,
+                    reserved_chat_commands=state.reserved_chat_commands,
+                    text_override=pending.text,
+                ):
+                    return
+
+                await _dispatch_pending_prompt(pending)
+
+            prompt_batcher = PromptInputBatcher(
+                task_group=tg,
+                debounce_s=(
+                    state.prompt_batch_debounce_s
+                    if state.prompt_batch_enabled
+                    else 0.0
+                ),
+                sleep=sleep,
+                dispatch=_dispatch_batched_prompt,
+                pending=state.prompt_batches,
+                max_messages=state.prompt_batch_max_messages,
+                max_chars=state.prompt_batch_max_chars,
+                separator=state.prompt_batch_separator,
+            )
+
             forward_coalescer = ForwardCoalescer(
                 task_group=tg,
                 debounce_s=state.forward_coalesce_s,
@@ -1889,6 +2219,8 @@ async def run_main_loop(
                 text = classification.text
                 is_voice_transcribed = False
                 if classification.is_forward_candidate:
+                    if prompt_batcher.attach_forward(msg):
+                        return
                     forward_coalescer.attach_forward(msg)
                     return
                 forward_key = _forward_key(msg)
@@ -1901,11 +2233,17 @@ async def run_main_loop(
                 reply_ref = ctx.reply_ref
                 topic_key = ctx.topic_key
                 chat_session_key = ctx.chat_session_key
-                stateful_mode = ctx.stateful_mode
                 chat_project = ctx.chat_project
                 ambient_context = ctx.ambient_context
 
                 if classification.is_cancel:
+                    prompt_batcher.cancel(
+                        prompt_batcher.key_for_message(
+                            msg,
+                            topic_key=topic_key,
+                            chat_session_key=chat_session_key,
+                        )
+                    )
                     tg.start_soon(
                         handle_cancel, cfg, msg, state.running_tasks, scheduler
                     )
@@ -1914,6 +2252,13 @@ async def run_main_loop(
                 command_id = classification.command_id
                 args_text = classification.args_text
                 if command_id == "new":
+                    prompt_batcher.cancel(
+                        prompt_batcher.key_for_message(
+                            msg,
+                            topic_key=topic_key,
+                            chat_session_key=chat_session_key,
+                        )
+                    )
                     forward_coalescer.cancel(forward_key)
                     if state.topic_store is not None and topic_key is not None:
                         tg.start_soon(
@@ -1948,6 +2293,20 @@ async def run_main_loop(
                             )
                         )
                         return
+                pending = _PendingPrompt(
+                    msg=msg,
+                    text=text,
+                    ambient_context=ambient_context,
+                    chat_project=chat_project,
+                    topic_key=topic_key,
+                    chat_session_key=chat_session_key,
+                    reply_ref=reply_ref,
+                    reply_id=reply_id,
+                    is_voice_transcribed=is_voice_transcribed,
+                    forwards=[],
+                )
+                if prompt_batcher.schedule(pending):
+                    return
                 if command_id is not None and _dispatch_builtin_command(
                     ctx=TelegramCommandContext(
                         cfg=cfg,
@@ -2042,45 +2401,25 @@ async def run_main_loop(
                     if command_id not in state.command_ids:
                         refresh_commands()
                     if command_id in state.command_ids:
-                        engine_resolution = await resolve_engine_defaults(
-                            explicit_engine=None,
-                            context=ambient_context,
-                            chat_id=chat_id,
+                        plugin_pending = _PendingPrompt(
+                            msg=msg,
+                            text=text,
+                            ambient_context=ambient_context,
+                            chat_project=chat_project,
                             topic_key=topic_key,
-                        )
-                        default_engine_override = (
-                            engine_resolution.engine
-                            if engine_resolution.source
-                            in {"directive", "topic_default", "chat_default"}
-                            else None
-                        )
-                        overrides_thread_id = (
-                            topic_key[1] if topic_key is not None else None
-                        )
-                        engine_overrides_resolver = partial(
-                            _resolve_engine_run_options,
-                            chat_id,
-                            overrides_thread_id,
-                            chat_prefs=state.chat_prefs,
-                            topic_store=state.topic_store,
+                            chat_session_key=chat_session_key,
+                            reply_ref=reply_ref,
+                            reply_id=reply_id,
+                            is_voice_transcribed=is_voice_transcribed,
+                            forwards=[],
                         )
                         tg.start_soon(
-                            dispatch_command,
-                            cfg,
-                            msg,
-                            text,
-                            command_id,
-                            args_text,
-                            state.running_tasks,
-                            scheduler,
-                            wrap_on_thread_known(
-                                scheduler.note_thread_known,
-                                topic_key,
-                                chat_session_key,
+                            partial(
+                                _dispatch_registered_command,
+                                command_id=command_id,
+                                args_text=args_text,
                             ),
-                            stateful_mode,
-                            default_engine_override,
-                            engine_overrides_resolver,
+                            plugin_pending,
                         )
                         return
 

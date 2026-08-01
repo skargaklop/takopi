@@ -18,6 +18,7 @@ If you need exact options and defaults, use **[Reference](../reference/index.md)
 
 - [Voice notes](voice-notes.md) (transcribe and run)
 - [File transfer](file-transfer.md) (`/file put` and `/file get`)
+- [Long Telegram prompts](long-telegram-prompts.md) (join several messages into one prompt)
 - [Schedule tasks](schedule-tasks.md) (Telegram scheduled messages)
 
 ## Extending Takopi

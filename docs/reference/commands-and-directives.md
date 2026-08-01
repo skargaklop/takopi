@@ -29,6 +29,7 @@ Notes:
 - Parsing stops at the first non-directive token (except `/goal`, which consumes the rest of the message as the condition).
 - `/plan` and `/goal` are reserved mode tokens (they win over a project alias named `plan` / `goal`).
 - If a reply contains a `ctx:` line, Takopi ignores new directives and uses the reply context.
+- **Multi-message input:** when prompt batching is enabled (default), several rapid text messages from the same sender/chat/topic/reply target are joined into one prompt before directives are parsed, so `/codex fix this` followed by a pasted body becomes one engine directive prompt. Control commands, voice, files, and forwards are never batched. See [Long Telegram prompts](../how-to/long-telegram-prompts.md).
 - **Plan** maps to CLI flags when available (`claude`/`grok` `--permission-mode plan`, `agy --mode plan`, optional `omp`/`pi`/`opencode` config). Other engines get a soft plan prompt prefix.
 - **Goal** is native for Claude (`-p "/goal …"`). Grok gets a best-effort `/goal` prompt prefix. Other engines get a soft condition note in the prompt.
 - When both plan and goal would apply, **goal wins** (plan mode would block unattended tool use).

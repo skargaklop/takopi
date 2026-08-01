@@ -36,8 +36,9 @@ def should_trigger_run(
     runtime: TransportRuntime,
     command_ids: set[str],
     reserved_chat_commands: set[str],
+    text_override: str | None = None,
 ) -> bool:
-    text = msg.text or ""
+    text = text_override if text_override is not None else (msg.text or "")
     lowered = text.lower()
     if bot_username:
         needle = f"@{bot_username}"

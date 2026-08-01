@@ -7,6 +7,7 @@ import re
 import sys
 from contextlib import contextmanager
 from contextvars import ContextVar
+from pathlib import Path
 from typing import Any, TextIO, cast
 
 import structlog
@@ -26,6 +27,10 @@ _LEVELS: dict[str, int] = {
 
 _MIN_LEVEL = _LEVELS["info"]
 _PIPELINE_LEVEL_NAME = "debug"
+
+# Mirror of config.HOME_CONFIG_PATH.parent — kept local to avoid importing the
+# config package into this low-level logging module.
+_TAKOPI_HOME_DIR = Path.home() / ".takopi"
 
 _suppress_below: ContextVar[int | None] = ContextVar(
     "takopi_suppress_below", default=None
@@ -169,7 +174,7 @@ class SafeWriter(io.TextIOBase):
             return 0
         try:
             return self._stream.write(message)
-        except BrokenPipeError, ValueError:
+        except (BrokenPipeError, ValueError):
             self._close()
             return 0
         except OSError as exc:
@@ -183,7 +188,7 @@ class SafeWriter(io.TextIOBase):
             return
         try:
             self._stream.flush()
-        except BrokenPipeError, ValueError:
+        except (BrokenPipeError, ValueError):
             self._close()
         except OSError as exc:
             if exc.errno == errno.EPIPE:
@@ -205,13 +210,31 @@ class SafeWriter(io.TextIOBase):
             return
 
 
+def _resolve_log_file_path(log_file: str) -> Path:
+    """Resolve a log file path.
+
+    Relative paths are resolved against the takopi home config directory
+    (``~/.takopi``) so logs always land there regardless of the process CWD.
+    Absolute paths are returned unchanged.
+    """
+    p = Path(log_file)
+    if p.is_absolute():
+        return p
+    return _TAKOPI_HOME_DIR / p
+
+
 def setup_logging(
-    *, debug: bool = False, cache_logger_on_first_use: bool = False
+    *,
+    debug: bool = False,
+    cache_logger_on_first_use: bool = False,
+    level: str | None = None,
+    file: str | None = None,
+    format: str | None = None,
 ) -> None:
     global _MIN_LEVEL, _PIPELINE_LEVEL_NAME
     global _log_file_handle
 
-    level_name = os.environ.get("TAKOPI_LOG_LEVEL")
+    level_name = os.environ.get("TAKOPI_LOG_LEVEL") or level
     if debug:
         level_name = "debug"
     _MIN_LEVEL = _level_value(level_name, default="info")
@@ -219,7 +242,9 @@ def setup_logging(
     trace_pipeline = _truthy(os.environ.get("TAKOPI_TRACE_PIPELINE"))
     _PIPELINE_LEVEL_NAME = "info" if trace_pipeline else "debug"
 
-    format_value = os.environ.get("TAKOPI_LOG_FORMAT", "console").strip().lower()
+    format_value = (
+        os.environ.get("TAKOPI_LOG_FORMAT") or format or "console"
+    ).strip().lower()
     color_override = os.environ.get("TAKOPI_LOG_COLOR")
     is_tty = sys.stdout.isatty() if color_override is None else _truthy(color_override)
     if format_value == "json":
@@ -228,7 +253,7 @@ def setup_logging(
         renderer = structlog.dev.ConsoleRenderer(colors=is_tty)
 
     safe_stream = cast(TextIO, SafeWriter(sys.stdout))
-    log_file = os.environ.get("TAKOPI_LOG_FILE")
+    log_file = os.environ.get("TAKOPI_LOG_FILE") or file
     if _log_file_handle is not None:
         try:
             _log_file_handle.close()
@@ -237,9 +262,10 @@ def setup_logging(
         else:
             _log_file_handle = None
     if log_file:
+        resolved = _resolve_log_file_path(str(log_file))
         try:
             _log_file_handle = open(  # noqa: SIM115
-                log_file, "a", encoding="utf-8"
+                resolved, "a", encoding="utf-8"
             )
         except OSError:
             _log_file_handle = None

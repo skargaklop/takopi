@@ -148,6 +148,11 @@ def test_telegram_backend_build_and_run_wires_config(
         voice_transcription_api_key="local",
         files=TelegramFilesSettings(enabled=True, allowed_user_ids=[1, 2]),
         topics=TelegramTopicsSettings(enabled=True, scope="main"),
+        prompt_batch_enabled=False,
+        prompt_batch_debounce_s=0.33,
+        prompt_batch_max_messages=5,
+        prompt_batch_max_chars=4096,
+        prompt_batch_separator="newline",
     )
 
     telegram_backend.TelegramBackend().build_and_run(
@@ -170,6 +175,11 @@ def test_telegram_backend_build_and_run_wires_config(
     assert cfg.files.enabled is True
     assert cfg.files.allowed_user_ids == [1, 2]
     assert cfg.topics.enabled is True
+    assert cfg.prompt_batch_enabled is False
+    assert cfg.prompt_batch_debounce_s == 0.33
+    assert cfg.prompt_batch_max_messages == 5
+    assert cfg.prompt_batch_max_chars == 4096
+    assert cfg.prompt_batch_separator == "newline"
     assert cfg.bot.token == "token"
     assert kwargs["watch_config"] is True
     assert kwargs["transport_id"] == "telegram"

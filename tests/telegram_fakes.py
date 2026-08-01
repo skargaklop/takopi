@@ -265,6 +265,11 @@ def make_cfg(
     engine_id: str = DEFAULT_ENGINE_ID,
     forward_coalesce_s: float = 0.0,
     media_group_debounce_s: float = 0.0,
+    prompt_batch_enabled: bool = True,
+    prompt_batch_debounce_s: float = 0.0,
+    prompt_batch_max_messages: int = 8,
+    prompt_batch_max_chars: int = 120_000,
+    prompt_batch_separator: str = "blank_line",
 ) -> TelegramBridgeConfig:
     if runner is None:
         runner = ScriptRunner([Return(answer="ok")], engine=engine_id)
@@ -285,4 +290,51 @@ def make_cfg(
         exec_cfg=exec_cfg,
         forward_coalesce_s=forward_coalesce_s,
         media_group_debounce_s=media_group_debounce_s,
+        prompt_batch_enabled=prompt_batch_enabled,
+        prompt_batch_debounce_s=prompt_batch_debounce_s,
+        prompt_batch_max_messages=prompt_batch_max_messages,
+        prompt_batch_max_chars=prompt_batch_max_chars,
+        prompt_batch_separator=prompt_batch_separator,
+    )
+
+
+def make_multi_runner_cfg(
+    transport: FakeTransport,
+    runners: list[ScriptRunner],
+    *,
+    default_engine: str | None = None,
+    forward_coalesce_s: float = 0.0,
+    media_group_debounce_s: float = 0.0,
+    prompt_batch_enabled: bool = True,
+    prompt_batch_debounce_s: float = 0.0,
+    prompt_batch_max_messages: int = 8,
+    prompt_batch_max_chars: int = 120_000,
+    prompt_batch_separator: str = "blank_line",
+) -> TelegramBridgeConfig:
+    if not runners:
+        raise ValueError("make_multi_runner_cfg needs at least one runner")
+    entries = [RunnerEntry(engine=runner.engine, runner=runner) for runner in runners]
+    router = AutoRouter(
+        entries=entries,
+        default_engine=default_engine or entries[0].engine,
+    )
+    exec_cfg = ExecBridgeConfig(
+        transport=transport,
+        presenter=MarkdownPresenter(),
+        final_notify=True,
+    )
+    runtime = TransportRuntime(router=router, projects=_empty_projects())
+    return TelegramBridgeConfig(
+        bot=FakeBot(),
+        runtime=runtime,
+        chat_id=123,
+        startup_msg="",
+        exec_cfg=exec_cfg,
+        forward_coalesce_s=forward_coalesce_s,
+        media_group_debounce_s=media_group_debounce_s,
+        prompt_batch_enabled=prompt_batch_enabled,
+        prompt_batch_debounce_s=prompt_batch_debounce_s,
+        prompt_batch_max_messages=prompt_batch_max_messages,
+        prompt_batch_max_chars=prompt_batch_max_chars,
+        prompt_batch_separator=prompt_batch_separator,
     )

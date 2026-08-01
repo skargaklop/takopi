@@ -35,6 +35,15 @@ def _load_settings_optional() -> tuple[TakopiSettings | None, Path | None]:
     return loaded
 
 
+def _resolve_log_settings() -> dict[str, str | None]:
+    """Load logging config from the config file (non-fatal on parse errors)."""
+    settings, _ = _load_settings_optional()
+    if settings is None:
+        return {}
+    cfg = settings.logging
+    return {"level": cfg.level, "file": cfg.file, "format": cfg.format}
+
+
 def _resolve_transport_id(override: str | None) -> str:
     if override is not None:
         value = override.strip()
@@ -203,7 +212,13 @@ def _run_auto_router(
 
     if debug:
         os.environ.setdefault("TAKOPI_LOG_FILE", "debug.log")
-    setup_logging_fn(debug=debug)
+    log_cfg = _resolve_log_settings()
+    setup_logging_fn(
+        debug=debug,
+        level=log_cfg.get("level"),
+        file=log_cfg.get("file"),
+        format=log_cfg.get("format"),
+    )
     lock_handle: LockHandle | None = None
     try:
         (
