@@ -393,7 +393,12 @@ class OpenCodeRunner(ResumeTokenMixin, JsonlSubprocessRunner):
 
     def command(self) -> str:
         import sys
-        if sys.platform == "win32" and not self.opencode_cmd.endswith(".exe") and not self.opencode_cmd.endswith(".cmd"):
+
+        if (
+            sys.platform == "win32"
+            and not self.opencode_cmd.endswith(".exe")
+            and not self.opencode_cmd.endswith(".cmd")
+        ):
             return self.opencode_cmd + ".cmd"
         return self.opencode_cmd
 

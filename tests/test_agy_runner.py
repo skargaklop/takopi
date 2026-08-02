@@ -77,16 +77,10 @@ def test_build_args_resume() -> None:
 
 def test_parse_conversation_id_from_logs() -> None:
     text = "Starting...\nCreated conversation aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa\n"
-    assert (
-        parse_conversation_id(text)
-        == "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
-    )
+    assert parse_conversation_id(text) == "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
 
     resume_line = "Resume with: agy --conversation bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
-    assert (
-        parse_conversation_id(resume_line)
-        == "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
-    )
+    assert parse_conversation_id(resume_line) == "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
 
     assert parse_conversation_id("no id here") is None
 
@@ -132,4 +126,3 @@ async def test_drain_stderr_start_soon_accepts_positional_args() -> None:
 
     async with anyio.create_task_group() as tg:
         tg.start_soon(runner._drain_stderr_capture, recv, state, "agy")
-

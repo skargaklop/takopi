@@ -92,8 +92,7 @@ def test_join_parts_in_message_id_order() -> None:
     ]
     assert join_prompt_parts(parts, separator="newline") == "first\nsecond\nthird"
     assert (
-        join_prompt_parts(parts, separator="blank_line")
-        == "first\n\nsecond\n\nthird"
+        join_prompt_parts(parts, separator="blank_line") == "first\n\nsecond\n\nthird"
     )
 
 

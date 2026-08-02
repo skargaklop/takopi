@@ -155,8 +155,11 @@ def test_onboarding_state_helpers(tmp_path: Path) -> None:
     assert state.bot_ref == "@takopi_bot"
 
 
-def test_display_path(tmp_path: Path) -> None:
-    home_path = Path.home() / "takopi" / "cfg.toml"
+def test_display_path(tmp_path: Path, monkeypatch) -> None:
+    fake_home = tmp_path / "fake_home"
+    fake_home.mkdir()
+    monkeypatch.setattr(Path, "home", lambda: fake_home)
+    home_path = fake_home / "takopi" / "cfg.toml"
     assert onboarding.display_path(home_path).startswith("~/")
     assert onboarding.display_path(tmp_path / "cfg.toml") == str(tmp_path / "cfg.toml")
 

@@ -8,7 +8,14 @@ from typing import Any
 
 from ..backends import EngineBackend, EngineConfig
 from ..config import ConfigError
-from ..model import ActionEvent, CompletedEvent, EngineId, ResumeToken, StartedEvent, TakopiEvent
+from ..model import (
+    ActionEvent,
+    CompletedEvent,
+    EngineId,
+    ResumeToken,
+    StartedEvent,
+    TakopiEvent,
+)
 from ..runner import Runner
 from .modes import effective_prompt, run_modes
 from .pi import PiRunner, PiStreamState, pi_schema
@@ -235,7 +242,9 @@ def build_runner(config: EngineConfig, config_path: Path) -> Runner:
 
     provider = config.get("provider")
     if provider is not None and not isinstance(provider, str):
-        raise ConfigError(f"Invalid `omp.provider` in {config_path}; expected a string.")
+        raise ConfigError(
+            f"Invalid `omp.provider` in {config_path}; expected a string."
+        )
 
     plan_mode = config.get("plan_mode", "soft")
     if plan_mode is not None and not isinstance(plan_mode, str):

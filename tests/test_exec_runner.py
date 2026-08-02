@@ -12,6 +12,7 @@ from takopi.model import (
     TakopiEvent,
 )
 from takopi.runners.codex import CodexRunner, find_exec_only_flag
+from tests._subprocess_helpers import make_executable_script
 
 CODEX_ENGINE = "codex"
 
@@ -169,8 +170,8 @@ async def test_run_serializes_new_session_after_session_is_known(
     resume_marker = tmp_path / "resume_started"
     thread_id = "019b73c4-0c3f-7701-a0bb-aac6b4d8a3bc"
 
-    codex_path = tmp_path / "codex"
-    codex_path.write_text(
+    codex_cmd = make_executable_script(
+        tmp_path,
         "#!/usr/bin/env python3\n"
         "import json\n"
         "import os\n"
@@ -193,15 +194,13 @@ async def test_run_serializes_new_session_after_session_is_known(
         "while not os.path.exists(gate):\n"
         "    time.sleep(0.001)\n"
         "sys.exit(0)\n",
-        encoding="utf-8",
     )
-    codex_path.chmod(0o755)
 
     monkeypatch.setenv("CODEX_TEST_GATE", str(gate_path))
     monkeypatch.setenv("CODEX_TEST_RESUME_MARKER", str(resume_marker))
     monkeypatch.setenv("CODEX_TEST_THREAD_ID", thread_id)
 
-    runner = CodexRunner(codex_cmd=str(codex_path), extra_args=[])
+    runner = CodexRunner(codex_cmd=codex_cmd, extra_args=[])
 
     session_started = anyio.Event()
     resume_value: str | None = None
@@ -244,8 +243,8 @@ async def test_run_serializes_new_session_after_session_is_known(
 async def test_codex_runner_preserves_warning_order(tmp_path) -> None:
     thread_id = "019b73c4-0c3f-7701-a0bb-aac6b4d8a3bc"
 
-    codex_path = tmp_path / "codex"
-    codex_path.write_text(
+    codex_cmd = make_executable_script(
+        tmp_path,
         "#!/usr/bin/env python3\n"
         "import json\n"
         "import sys\n"
@@ -254,11 +253,9 @@ async def test_codex_runner_preserves_warning_order(tmp_path) -> None:
         "print(json.dumps({'type': 'error', 'message': 'warning one'}), flush=True)\n"
         f"print(json.dumps({{'type': 'thread.started', 'thread_id': '{thread_id}'}}), flush=True)\n"
         "print(json.dumps({'type': 'item.completed', 'item': {'id': 'item_0', 'type': 'agent_message', 'text': 'ok'}}), flush=True)\n",
-        encoding="utf-8",
     )
-    codex_path.chmod(0o755)
 
-    runner = CodexRunner(codex_cmd=str(codex_path), extra_args=[])
+    runner = CodexRunner(codex_cmd=codex_cmd, extra_args=[])
     seen = [evt async for evt in runner.run("hi", None)]
 
     assert len(seen) == 3
@@ -280,8 +277,8 @@ async def test_codex_runner_preserves_warning_order(tmp_path) -> None:
 async def test_codex_runner_reconnect_notice_is_non_fatal(tmp_path) -> None:
     thread_id = "019b73c4-0c3f-7701-a0bb-aac6b4d8a3bc"
 
-    codex_path = tmp_path / "codex"
-    codex_path.write_text(
+    codex_cmd = make_executable_script(
+        tmp_path,
         "#!/usr/bin/env python3\n"
         "import json\n"
         "import sys\n"
@@ -290,11 +287,9 @@ async def test_codex_runner_reconnect_notice_is_non_fatal(tmp_path) -> None:
         "print(json.dumps({'type': 'error', 'message': 'Reconnecting... 1/5'}), flush=True)\n"
         f"print(json.dumps({{'type': 'thread.started', 'thread_id': '{thread_id}'}}), flush=True)\n"
         "print(json.dumps({'type': 'item.completed', 'item': {'id': 'item_0', 'type': 'agent_message', 'text': 'ok'}}), flush=True)\n",
-        encoding="utf-8",
     )
-    codex_path.chmod(0o755)
 
-    runner = CodexRunner(codex_cmd=str(codex_path), extra_args=[])
+    runner = CodexRunner(codex_cmd=codex_cmd, extra_args=[])
     seen = [evt async for evt in runner.run("hi", None)]
 
     assert len(seen) == 3
@@ -316,8 +311,8 @@ async def test_codex_runner_reconnect_notice_is_non_fatal(tmp_path) -> None:
 async def test_codex_runner_reconnect_notice_updates_phase(tmp_path) -> None:
     thread_id = "019b73c4-0c3f-7701-a0bb-aac6b4d8a3bc"
 
-    codex_path = tmp_path / "codex"
-    codex_path.write_text(
+    codex_cmd = make_executable_script(
+        tmp_path,
         "#!/usr/bin/env python3\n"
         "import json\n"
         "import sys\n"
@@ -328,11 +323,9 @@ async def test_codex_runner_reconnect_notice_updates_phase(tmp_path) -> None:
         f"print(json.dumps({{'type': 'thread.started', 'thread_id': '{thread_id}'}}), flush=True)\n"
         "print(json.dumps({'type': 'item.completed', 'item': {'id': 'item_0', 'type': 'agent_message', 'text': 'ok'}}), flush=True)\n"
         "print(json.dumps({'type': 'turn.completed', 'usage': {'input_tokens': 1, 'cached_input_tokens': 0, 'output_tokens': 1}}), flush=True)\n",
-        encoding="utf-8",
     )
-    codex_path.chmod(0o755)
 
-    runner = CodexRunner(codex_cmd=str(codex_path), extra_args=[])
+    runner = CodexRunner(codex_cmd=codex_cmd, extra_args=[])
     seen = [evt async for evt in runner.run("hi", None)]
 
     assert len(seen) == 4
@@ -351,8 +344,8 @@ async def test_codex_runner_reconnect_notice_updates_phase(tmp_path) -> None:
 async def test_codex_runner_prefers_final_answer_phase(tmp_path) -> None:
     thread_id = "019b73c4-0c3f-7701-a0bb-aac6b4d8a3bc"
 
-    codex_path = tmp_path / "codex"
-    codex_path.write_text(
+    codex_cmd = make_executable_script(
+        tmp_path,
         "#!/usr/bin/env python3\n"
         "import json\n"
         "import sys\n"
@@ -363,11 +356,9 @@ async def test_codex_runner_prefers_final_answer_phase(tmp_path) -> None:
         "print(json.dumps({'type': 'item.completed', 'item': {'id': 'item_0', 'type': 'agent_message', 'phase': 'commentary', 'text': 'Working through the task.'}}), flush=True)\n"
         "print(json.dumps({'type': 'item.completed', 'item': {'id': 'item_1', 'type': 'agent_message', 'phase': 'final_answer', 'text': 'Done.'}}), flush=True)\n"
         "print(json.dumps({'type': 'turn.completed', 'usage': {'input_tokens': 1, 'cached_input_tokens': 0, 'output_tokens': 1}}), flush=True)\n",
-        encoding="utf-8",
     )
-    codex_path.chmod(0o755)
 
-    runner = CodexRunner(codex_cmd=str(codex_path), extra_args=[])
+    runner = CodexRunner(codex_cmd=codex_cmd, extra_args=[])
     seen = [evt async for evt in runner.run("hi", None)]
 
     assert len(seen) == 4
@@ -387,8 +378,8 @@ async def test_codex_runner_prefers_final_answer_phase(tmp_path) -> None:
 async def test_codex_runner_legacy_agent_message_no_phase(tmp_path) -> None:
     thread_id = "019b73c4-0c3f-7701-a0bb-aac6b4d8a3bc"
 
-    codex_path = tmp_path / "codex"
-    codex_path.write_text(
+    codex_cmd = make_executable_script(
+        tmp_path,
         "#!/usr/bin/env python3\n"
         "import json\n"
         "import sys\n"
@@ -399,11 +390,9 @@ async def test_codex_runner_legacy_agent_message_no_phase(tmp_path) -> None:
         "print(json.dumps({'type': 'item.completed', 'item': {'id': 'item_0', 'type': 'agent_message', 'text': 'first'}}), flush=True)\n"
         "print(json.dumps({'type': 'item.completed', 'item': {'id': 'item_1', 'type': 'agent_message', 'text': 'second'}}), flush=True)\n"
         "print(json.dumps({'type': 'turn.completed', 'usage': {'input_tokens': 1, 'cached_input_tokens': 0, 'output_tokens': 1}}), flush=True)\n",
-        encoding="utf-8",
     )
-    codex_path.chmod(0o755)
 
-    runner = CodexRunner(codex_cmd=str(codex_path), extra_args=[])
+    runner = CodexRunner(codex_cmd=codex_cmd, extra_args=[])
     seen = [evt async for evt in runner.run("hi", None)]
 
     completed = next(evt for evt in seen if isinstance(evt, CompletedEvent))
@@ -414,8 +403,8 @@ async def test_codex_runner_legacy_agent_message_no_phase(tmp_path) -> None:
 async def test_codex_runner_collab_tool_call_does_not_break_stream(tmp_path) -> None:
     thread_id = "019b73c4-0c3f-7701-a0bb-aac6b4d8a3bc"
 
-    codex_path = tmp_path / "codex"
-    codex_path.write_text(
+    codex_cmd = make_executable_script(
+        tmp_path,
         "#!/usr/bin/env python3\n"
         "import json\n"
         "import sys\n"
@@ -427,11 +416,9 @@ async def test_codex_runner_collab_tool_call_does_not_break_stream(tmp_path) -> 
         "print(json.dumps({'type': 'item.completed', 'item': {'id': 'item_0', 'type': 'collab_tool_call', 'tool': 'spawn_agent', 'sender_thread_id': 'main', 'receiver_thread_ids': ['worker'], 'prompt': 'check tests', 'agents_states': {'worker': {'status': 'completed', 'message': 'ok'}}, 'status': 'completed'}}), flush=True)\n"
         "print(json.dumps({'type': 'item.completed', 'item': {'id': 'item_1', 'type': 'agent_message', 'text': 'ok'}}), flush=True)\n"
         "print(json.dumps({'type': 'turn.completed', 'usage': {'input_tokens': 1, 'cached_input_tokens': 0, 'output_tokens': 1}}), flush=True)\n",
-        encoding="utf-8",
     )
-    codex_path.chmod(0o755)
 
-    runner = CodexRunner(codex_cmd=str(codex_path), extra_args=[])
+    runner = CodexRunner(codex_cmd=codex_cmd, extra_args=[])
     seen = [evt async for evt in runner.run("hi", None)]
 
     completed = next(evt for evt in seen if isinstance(evt, CompletedEvent))
@@ -442,8 +429,8 @@ async def test_codex_runner_collab_tool_call_does_not_break_stream(tmp_path) -> 
 async def test_codex_runner_unknown_item_type_does_not_break_stream(tmp_path) -> None:
     thread_id = "019b73c4-0c3f-7701-a0bb-aac6b4d8a3bc"
 
-    codex_path = tmp_path / "codex"
-    codex_path.write_text(
+    codex_cmd = make_executable_script(
+        tmp_path,
         "#!/usr/bin/env python3\n"
         "import json\n"
         "import sys\n"
@@ -454,11 +441,9 @@ async def test_codex_runner_unknown_item_type_does_not_break_stream(tmp_path) ->
         "print(json.dumps({'type': 'item.completed', 'item': {'id': 'item_0', 'type': 'future_item', 'foo': 'bar'}}), flush=True)\n"
         "print(json.dumps({'type': 'item.completed', 'item': {'id': 'item_1', 'type': 'agent_message', 'text': 'ok'}}), flush=True)\n"
         "print(json.dumps({'type': 'turn.completed', 'usage': {'input_tokens': 1, 'cached_input_tokens': 0, 'output_tokens': 1}}), flush=True)\n",
-        encoding="utf-8",
     )
-    codex_path.chmod(0o755)
 
-    runner = CodexRunner(codex_cmd=str(codex_path), extra_args=[])
+    runner = CodexRunner(codex_cmd=codex_cmd, extra_args=[])
     seen = [evt async for evt in runner.run("hi", None)]
 
     completed = next(evt for evt in seen if isinstance(evt, CompletedEvent))
@@ -468,19 +453,17 @@ async def test_codex_runner_unknown_item_type_does_not_break_stream(tmp_path) ->
 
 @pytest.mark.anyio
 async def test_codex_runner_includes_stderr_reason(tmp_path) -> None:
-    codex_path = tmp_path / "codex"
-    codex_path.write_text(
+    codex_cmd = make_executable_script(
+        tmp_path,
         "#!/usr/bin/env python3\n"
         "import sys\n"
         "\n"
         "sys.stderr.write('Not inside a trusted directory and --skip-git-repo-check was not specified.\\n')\n"
         "sys.stderr.flush()\n"
         "sys.exit(1)\n",
-        encoding="utf-8",
     )
-    codex_path.chmod(0o755)
 
-    runner = CodexRunner(codex_cmd=str(codex_path), extra_args=[])
+    runner = CodexRunner(codex_cmd=codex_cmd, extra_args=[])
     events = [evt async for evt in runner.run("hi", None)]
 
     completed = next(evt for evt in events if isinstance(evt, CompletedEvent))
@@ -497,8 +480,8 @@ async def test_run_serializes_two_new_sessions_same_thread(
     gate_path = tmp_path / "gate"
     thread_id = "019b73c4-0c3f-7701-a0bb-aac6b4d8a3bc"
 
-    codex_path = tmp_path / "codex"
-    codex_path.write_text(
+    codex_cmd = make_executable_script(
+        tmp_path,
         "#!/usr/bin/env python3\n"
         "import json\n"
         "import os\n"
@@ -512,14 +495,12 @@ async def test_run_serializes_two_new_sessions_same_thread(
         "while not os.path.exists(gate):\n"
         "    time.sleep(0.001)\n"
         "sys.exit(0)\n",
-        encoding="utf-8",
     )
-    codex_path.chmod(0o755)
 
     monkeypatch.setenv("CODEX_TEST_GATE", str(gate_path))
     monkeypatch.setenv("CODEX_TEST_THREAD_ID", thread_id)
 
-    runner = CodexRunner(codex_cmd=str(codex_path), extra_args=[])
+    runner = CodexRunner(codex_cmd=codex_cmd, extra_args=[])
 
     started_first = anyio.Event()
     started_second = anyio.Event()

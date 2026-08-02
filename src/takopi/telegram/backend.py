@@ -80,7 +80,6 @@ def _build_startup_message(
     )
 
 
-
 class TelegramBackend(TransportBackend):
     id = "telegram"
     description = "Telegram bot"

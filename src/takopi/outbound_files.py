@@ -141,9 +141,7 @@ def append_send_instruction(
     return f"{body}\n\n{block}"
 
 
-def _resolve_outbound_path(
-    raw: str, *, run_root: Path
-) -> tuple[Path, Path] | None:
+def _resolve_outbound_path(raw: str, *, run_root: Path) -> tuple[Path, Path] | None:
     """Resolve an outbound marker path to (relative, absolute) within run_root.
 
     Accepts both project-relative paths and absolute paths that resolve inside
@@ -173,7 +171,6 @@ def _resolve_outbound_path(
     if target is None:
         return None
     return rel, target
-
 
 
 def _validate_and_load(
@@ -339,9 +336,7 @@ def settings_from_files_config(files_cfg: object) -> OutboundSettings:
     """Build OutboundSettings from TelegramFilesSettings (duck-typed)."""
     enabled = bool(getattr(files_cfg, "enabled", False))
     send_enabled = bool(getattr(files_cfg, "send_enabled", True))
-    exts = getattr(files_cfg, "send_extensions", None) or list(
-        _default_exts_fallback()
-    )
+    exts = getattr(files_cfg, "send_extensions", None) or list(_default_exts_fallback())
     deny = getattr(files_cfg, "deny_globs", None) or []
     max_bytes = int(
         getattr(files_cfg, "max_download_bytes", None) or (50 * 1024 * 1024)

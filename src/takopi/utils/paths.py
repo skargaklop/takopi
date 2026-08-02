@@ -34,7 +34,7 @@ def relativize_path(value: str, *, base_dir: Path | None = None) -> str:
     for sep in (os.sep, "/"):
         prefix = base_str if base_str.endswith(sep) else f"{base_str}{sep}"
         if value.startswith(prefix):
-            suffix = value[len(prefix) :]
+            suffix = value[len(prefix) :].replace("\\", "/")
             return suffix or "."
     return value
 
@@ -43,5 +43,8 @@ def relativize_command(value: str, *, base_dir: Path | None = None) -> str:
     base = get_run_base_dir() if base_dir is None else base_dir
     if base is None:
         base = Path.cwd()
-    base_with_sep = f"{base}{os.sep}"
-    return value.replace(base_with_sep, "")
+    result = value
+    for sep in (os.sep, "/"):
+        base_with_sep = f"{base}{sep}"
+        result = result.replace(base_with_sep, "")
+    return result

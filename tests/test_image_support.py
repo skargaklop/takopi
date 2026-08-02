@@ -25,12 +25,8 @@ def test_files_settings_image_defaults() -> None:
 
 
 def test_is_image_document_mime_and_photo() -> None:
-    assert is_image_document(
-        mime_type="image/png", file_name="x.bin", raw=None
-    )
-    assert is_image_document(
-        mime_type=None, file_name="shot.JPG", raw=None
-    )
+    assert is_image_document(mime_type="image/png", file_name="x.bin", raw=None)
+    assert is_image_document(mime_type=None, file_name="shot.JPG", raw=None)
     assert is_image_document(
         mime_type=None, file_name=None, raw={"width": 100, "height": 80}
     )

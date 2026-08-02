@@ -104,7 +104,9 @@ async def _handle_plan_command(
             if enabled is None:
                 await reply(text="topic plan mode cleared (using chat/default).")
             else:
-                await reply(text=f"topic plan mode set to `{'on' if enabled else 'off'}`.")
+                await reply(
+                    text=f"topic plan mode set to `{'on' if enabled else 'off'}`."
+                )
             return
         if chat_prefs is None:
             await reply(text="chat plan mode is unavailable (no config path).")

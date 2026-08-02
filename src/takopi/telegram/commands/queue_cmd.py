@@ -40,7 +40,14 @@ async def _handle_queue_command(
     scheduler: ThreadScheduler | None = None,
     running_tasks: RunningTasks | None = None,
 ) -> None:
-    del args_text, ambient_context, topic_store, chat_prefs, resolved_scope, scope_chat_ids
+    del (
+        args_text,
+        ambient_context,
+        topic_store,
+        chat_prefs,
+        resolved_scope,
+        scope_chat_ids,
+    )
     reply = make_reply(cfg, msg)
     if scheduler is None:
         await reply(text="queue is unavailable.")

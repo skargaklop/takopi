@@ -1,5 +1,6 @@
 import json
 import os
+from pathlib import Path
 
 import pytest
 
@@ -22,7 +23,11 @@ def test_lockfile_creates_and_cleans_up(tmp_path) -> None:
     assert not lockfile.lock_path_for_config(config_path).exists()
 
 
-def test_lockfile_refuses_running_pid(tmp_path) -> None:
+def test_lockfile_refuses_running_pid(tmp_path, monkeypatch) -> None:
+    fake_home = tmp_path / "fake_home"
+    fake_home.mkdir()
+    monkeypatch.setattr(Path, "home", lambda: fake_home)
+
     config_path = tmp_path / "takopi.toml"
     config_path.write_text("ok", encoding="utf-8")
 
@@ -38,7 +43,9 @@ def test_lockfile_refuses_running_pid(tmp_path) -> None:
             )
         message = str(exc.value).lower()
         assert "already running" in message
-        assert str(lockfile.lock_path_for_config(config_path)) in str(exc.value)
+        assert str(lockfile.lock_path_for_config(config_path.resolve())) in str(
+            exc.value
+        )
     finally:
         handle.release()
 

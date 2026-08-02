@@ -31,7 +31,7 @@ _CONFIG_PATH_OPTION = typer.Option(
 def _config_path_display(path: Path) -> str:
     home = Path.home()
     try:
-        return f"~/{path.relative_to(home)}"
+        return f"~/{path.relative_to(home).as_posix()}"
     except ValueError:
         return str(path)
 

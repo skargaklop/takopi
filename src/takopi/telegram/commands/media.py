@@ -154,9 +154,7 @@ async def _handle_media_group(
                 attachments = tuple(
                     PromptAttachment(
                         rel_path=item.rel_path.as_posix(),
-                        abs_path=str(
-                            (saved_group.run_root / item.rel_path).resolve()
-                        ),
+                        abs_path=str((saved_group.run_root / item.rel_path).resolve()),
                         kind="image" if has_image else "file",
                     )
                     for item in saved_group.saved

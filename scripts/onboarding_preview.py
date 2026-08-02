@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Iterable, Iterator
+from typing import Any
+from collections.abc import Iterable, Iterator
 
 import anyio
 from rich.console import Console
@@ -230,6 +231,7 @@ def main() -> None:
         ),
         ScriptedServices(bot=bot, chat=private_chat, engines=engines_missing),
     )
+
 
 if __name__ == "__main__":
     main()

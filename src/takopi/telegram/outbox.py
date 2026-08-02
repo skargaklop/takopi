@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio as _asyncio
 import time
 from dataclasses import dataclass, field
 from typing import Any, TYPE_CHECKING
@@ -53,13 +54,35 @@ class TelegramOutbox:
         self._tg: TaskGroup | None = None
         self.next_at = 0.0
         self.retry_at = 0.0
+        self._worker_started: anyio.Event | None = None
+        self._worker_done: anyio.Event | None = None
+
+    async def _worker_owner(self) -> None:
+        """Lifecycle owner: enters and exits the task group in the same task.
+
+        Spawned as a background asyncio task by ensure_worker().  This is the
+        only task that touches ``self._tg`` — all other methods only read it
+        to check whether the worker is alive (e.g. in close()).
+        """
+        try:
+            async with anyio.create_task_group() as tg:
+                self._tg = tg
+                if self._worker_started is not None:
+                    self._worker_started.set()
+                await self._run()
+        finally:
+            self._tg = None
+            if self._worker_done is not None:
+                self._worker_done.set()
 
     async def ensure_worker(self) -> None:
         async with self._start_lock:
-            if self._tg is not None or self._closed:
+            if self._worker_started is not None or self._closed:
                 return
-            self._tg = await anyio.create_task_group().__aenter__()
-            self._tg.start_soon(self.run)
+            self._worker_started = anyio.Event()
+            self._worker_done = anyio.Event()
+            _asyncio.get_running_loop().create_task(self._worker_owner())
+            await self._worker_started.wait()
 
     async def enqueue(self, *, key: Hashable, op: OutboxOp, wait: bool = True) -> Any:
         await self.ensure_worker()
@@ -90,9 +113,10 @@ class TelegramOutbox:
             self._closed = True
             self.fail_pending()
             self._cond.notify_all()
-        if self._tg is not None:
-            await self._tg.__aexit__(None, None, None)
-            self._tg = None
+        if self._worker_done is not None:
+            await self._worker_done.wait()
+        self._worker_started = None
+        self._worker_done = None
 
     def fail_pending(self) -> None:
         for pending in list(self._pending.values()):
@@ -122,7 +146,7 @@ class TelegramOutbox:
         if delay > 0:
             await self._sleep(delay)
 
-    async def run(self) -> None:
+    async def _run(self) -> None:
         cancel_exc = anyio.get_cancelled_exc_class()
         try:
             while True:

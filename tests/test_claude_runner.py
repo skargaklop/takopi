@@ -14,6 +14,7 @@ from takopi.runners.claude import (
     translate_claude_event,
 )
 from takopi.schemas import claude as claude_schema
+from tests._subprocess_helpers import make_executable_script
 
 
 def _load_fixture(
@@ -277,8 +278,8 @@ async def test_run_serializes_new_session_after_session_is_known(
     resume_marker = tmp_path / "resume_started"
     session_id = "session_01"
 
-    claude_path = tmp_path / "claude"
-    claude_path.write_text(
+    claude_cmd = make_executable_script(
+        tmp_path,
         "#!/usr/bin/env python3\n"
         "import json\n"
         "import os\n"
@@ -316,15 +317,13 @@ async def test_run_serializes_new_session_after_session_is_known(
         "while not os.path.exists(gate):\n"
         "    time.sleep(0.001)\n"
         "sys.exit(0)\n",
-        encoding="utf-8",
     )
-    claude_path.chmod(0o755)
 
     monkeypatch.setenv("CLAUDE_TEST_GATE", str(gate_path))
     monkeypatch.setenv("CLAUDE_TEST_RESUME_MARKER", str(resume_marker))
     monkeypatch.setenv("CLAUDE_TEST_SESSION_ID", session_id)
 
-    runner = ClaudeRunner(claude_cmd=str(claude_path))
+    runner = ClaudeRunner(claude_cmd=claude_cmd)
 
     session_started = anyio.Event()
     resume_value: str | None = None
@@ -364,8 +363,8 @@ async def test_run_serializes_new_session_after_session_is_known(
 
 @pytest.mark.anyio
 async def test_run_strips_anthropic_api_key_by_default(tmp_path, monkeypatch) -> None:
-    claude_path = tmp_path / "claude"
-    claude_path.write_text(
+    claude_cmd = make_executable_script(
+        tmp_path,
         "#!/usr/bin/env python3\n"
         "import json\n"
         "import os\n"
@@ -404,20 +403,18 @@ async def test_run_strips_anthropic_api_key_by_default(tmp_path, monkeypatch) ->
         "}\n"
         "print(json.dumps(result), flush=True)\n"
         "raise SystemExit(0)\n",
-        encoding="utf-8",
     )
-    claude_path.chmod(0o755)
 
     monkeypatch.setenv("ANTHROPIC_API_KEY", "secret")
 
-    runner = ClaudeRunner(claude_cmd=str(claude_path))
+    runner = ClaudeRunner(claude_cmd=claude_cmd)
     answer: str | None = None
     async for event in runner.run("hello", None):
         if isinstance(event, CompletedEvent):
             answer = event.answer
     assert answer == "api=unset"
 
-    runner_api = ClaudeRunner(claude_cmd=str(claude_path), use_api_billing=True)
+    runner_api = ClaudeRunner(claude_cmd=claude_cmd, use_api_billing=True)
     answer = None
     async for event in runner_api.run("hello", None):
         if isinstance(event, CompletedEvent):

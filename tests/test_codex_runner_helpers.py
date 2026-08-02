@@ -29,6 +29,7 @@ from takopi.runners.codex import (
     translate_codex_event,
 )
 from takopi.schemas import codex as codex_schema
+from tests._subprocess_helpers import make_executable_script
 
 
 def test_codex_helper_functions() -> None:
@@ -257,13 +258,11 @@ def test_codex_runner_process_and_stream_end_events() -> None:
 
 @pytest.mark.anyio
 async def test_app_server_client_fails_waiters_on_clean_eof(tmp_path: Path) -> None:
-    codex_path = tmp_path / "codex"
-    codex_path.write_text(
+    codex_cmd = make_executable_script(
+        tmp_path,
         "#!/usr/bin/env python3\nimport sys\n\nfor _line in sys.stdin:\n    break\n",
-        encoding="utf-8",
     )
-    codex_path.chmod(0o755)
-    client = _AppServerClient(codex_cmd=str(codex_path), extra_args=[])
+    client = _AppServerClient(codex_cmd=codex_cmd, extra_args=[])
 
     with anyio.fail_after(2), pytest.raises(RuntimeError, match="closed stdout"):
         await client.start()
@@ -294,8 +293,8 @@ def test_app_server_client_handles_server_requests() -> None:
 async def test_app_server_runner_raises_on_turn_stream_eof(
     tmp_path: Path,
 ) -> None:
-    codex_path = tmp_path / "codex"
-    codex_path.write_text(
+    codex_cmd = make_executable_script(
+        tmp_path,
         "#!/usr/bin/env python3\n"
         "import json\n"
         "import sys\n"
@@ -318,10 +317,8 @@ async def test_app_server_runner_raises_on_turn_stream_eof(
         "        send({'id': req_id, 'result': {'turn': turn}})\n"
         "        send({'method': 'turn/started', 'params': {'threadId': 'thread-1', 'turn': turn}})\n"
         "        break\n",
-        encoding="utf-8",
     )
-    codex_path.chmod(0o755)
-    runner = AppServerCodexRunner(codex_cmd=str(codex_path), extra_args=[])
+    runner = AppServerCodexRunner(codex_cmd=codex_cmd, extra_args=[])
 
     stream = runner.run("hello", None)
     with anyio.fail_after(2):
@@ -338,8 +335,8 @@ async def test_app_server_runner_raises_on_turn_stream_eof(
 async def test_app_server_codex_runner_translates_turn_notifications(
     tmp_path: Path,
 ) -> None:
-    codex_path = tmp_path / "codex"
-    codex_path.write_text(
+    codex_cmd = make_executable_script(
+        tmp_path,
         "#!/usr/bin/env python3\n"
         "import json\n"
         "import sys\n"
@@ -371,10 +368,8 @@ async def test_app_server_codex_runner_translates_turn_notifications(
         "        send({'method': 'item/completed', 'params': {'threadId': 'thread-1', 'turnId': 'turn-1', 'item': {'id': 'a1', 'type': 'agentMessage', 'phase': 'final_answer', 'text': 'done'}}})\n"
         "        send({'method': 'turn/completed', 'params': {'threadId': 'thread-1', 'turn': {'id': 'turn-1', 'status': 'completed', 'items': []}}})\n"
         "        break\n",
-        encoding="utf-8",
     )
-    codex_path.chmod(0o755)
-    runner = AppServerCodexRunner(codex_cmd=str(codex_path), extra_args=[])
+    runner = AppServerCodexRunner(codex_cmd=codex_cmd, extra_args=[])
 
     with anyio.fail_after(2):
         events = [event async for event in runner.run("hello", None)]

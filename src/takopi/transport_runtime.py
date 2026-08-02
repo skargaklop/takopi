@@ -253,9 +253,7 @@ class TransportRuntime:
                 prompt, is_resume_line=entry.runner.is_resume_line
             )
             if cleaned == prompt:
-                cleaned = strip_engine_resume_prefix(
-                    prompt, engine=user_resume.engine
-                )
+                cleaned = strip_engine_resume_prefix(prompt, engine=user_resume.engine)
             return user_resume, None, cleaned
 
         # 2) Reconstruct after directive strip: "/claude resume id" → "claude resume id"
@@ -292,9 +290,7 @@ class TransportRuntime:
                 eng, token = alias
                 known = {e.lower() for e in self._router.engine_ids}
                 if eng in known:
-                    cleaned = strip_engine_resume_prefix(
-                        prompt, engine=eng
-                    )
+                    cleaned = strip_engine_resume_prefix(prompt, engine=eng)
                     return ResumeToken(engine=eng, value=token), None, cleaned
 
         # 4) Bare `resume <id> [rest]` — highest-priority user intent; engine may
@@ -454,6 +450,4 @@ class TransportRuntime:
         plan: bool = False,
         goal: str | None = None,
     ) -> str | None:
-        return compose_context_line(
-            context, self._projects, plan=plan, goal=goal
-        )
+        return compose_context_line(context, self._projects, plan=plan, goal=goal)

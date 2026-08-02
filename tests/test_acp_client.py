@@ -33,7 +33,9 @@ async def test_initialize_sends_client_info() -> None:
 @pytest.mark.anyio
 async def test_resume_or_load_uses_session_load() -> None:
     transport = FakeAcpTransport()
-    transport.queue_response("initialize", {"protocolVersion": 1, "agentCapabilities": {"loadSession": True}})
+    transport.queue_response(
+        "initialize", {"protocolVersion": 1, "agentCapabilities": {"loadSession": True}}
+    )
     transport.queue_response("session/load", {})
     client = AcpClient(command="fake", args=[], transport=transport)
     await client.initialize()
@@ -47,7 +49,9 @@ async def test_resume_or_load_uses_session_load() -> None:
 @pytest.mark.anyio
 async def test_available_commands_enables_compact() -> None:
     transport = FakeAcpTransport()
-    transport.queue_response("initialize", {"protocolVersion": 1, "agentCapabilities": {"loadSession": True}})
+    transport.queue_response(
+        "initialize", {"protocolVersion": 1, "agentCapabilities": {"loadSession": True}}
+    )
     transport.queue_response("session/load", {})
     client = AcpClient(command="fake", args=[], transport=transport)
     await client.initialize()
@@ -64,7 +68,9 @@ async def test_available_commands_enables_compact() -> None:
 @pytest.mark.anyio
 async def test_compact_requires_advertised_command() -> None:
     transport = FakeAcpTransport()
-    transport.queue_response("initialize", {"protocolVersion": 1, "agentCapabilities": {"loadSession": True}})
+    transport.queue_response(
+        "initialize", {"protocolVersion": 1, "agentCapabilities": {"loadSession": True}}
+    )
     transport.queue_response("session/load", {})
     client = AcpClient(command="fake", args=[], transport=transport)
     await client.initialize()
@@ -82,7 +88,9 @@ async def test_compact_requires_advertised_command() -> None:
 @pytest.mark.anyio
 async def test_prompt_sends_compact_text() -> None:
     transport = FakeAcpTransport()
-    transport.queue_response("initialize", {"protocolVersion": 1, "agentCapabilities": {"loadSession": True}})
+    transport.queue_response(
+        "initialize", {"protocolVersion": 1, "agentCapabilities": {"loadSession": True}}
+    )
     transport.queue_response("session/load", {})
     transport.queue_response(
         "session/prompt",
@@ -109,7 +117,9 @@ async def test_prompt_sends_compact_text() -> None:
 @pytest.mark.anyio
 async def test_no_session_new_in_compact_path() -> None:
     transport = FakeAcpTransport()
-    transport.queue_response("initialize", {"protocolVersion": 1, "agentCapabilities": {"loadSession": True}})
+    transport.queue_response(
+        "initialize", {"protocolVersion": 1, "agentCapabilities": {"loadSession": True}}
+    )
     transport.queue_response("session/load", {})
     client = AcpClient(command="fake", args=[], transport=transport)
     await client.initialize()

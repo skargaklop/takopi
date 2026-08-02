@@ -30,7 +30,18 @@ __all__ = [
 ]
 
 _IMAGE_EXTENSIONS = frozenset(
-    {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".heic", ".heif", ".tif", ".tiff"}
+    {
+        ".png",
+        ".jpg",
+        ".jpeg",
+        ".gif",
+        ".webp",
+        ".bmp",
+        ".heic",
+        ".heif",
+        ".tif",
+        ".tiff",
+    }
 )
 
 
@@ -82,6 +93,8 @@ def normalize_relative_path(value: str) -> Path | None:
     if not cleaned:
         return None
     if cleaned.startswith("~"):
+        return None
+    if cleaned.startswith("/"):
         return None
     path = Path(cleaned)
     if path.is_absolute():

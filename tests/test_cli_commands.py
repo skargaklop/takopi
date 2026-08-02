@@ -200,7 +200,10 @@ def test_onboarding_paths_calls_debug(monkeypatch) -> None:
     assert called["count"] == 1
 
 
-def test_config_path_cmd_outputs_override(tmp_path: Path) -> None:
+def test_config_path_cmd_outputs_override(tmp_path: Path, monkeypatch) -> None:
+    fake_home = tmp_path / "fake_home"
+    fake_home.mkdir()
+    monkeypatch.setattr(Path, "home", lambda: fake_home)
     config_path = tmp_path / "takopi.toml"
     runner = CliRunner()
     result = runner.invoke(
@@ -214,6 +217,7 @@ def test_config_path_cmd_outputs_override(tmp_path: Path) -> None:
 
 def test_config_path_cmd_defaults_to_home(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
     config_path = tmp_path / ".takopi" / "takopi.toml"
     monkeypatch.setattr(cli, "HOME_CONFIG_PATH", config_path)
 

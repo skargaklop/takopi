@@ -32,7 +32,7 @@ def terminate_process(proc: Process) -> None:
 def kill_process(proc: Process) -> None:
     _signal_process(
         proc,
-        signal.SIGKILL,
+        getattr(signal, "SIGKILL", None),
         fallback=proc.kill,
         log_event="subprocess.kill.failed",
     )
@@ -40,7 +40,7 @@ def kill_process(proc: Process) -> None:
 
 def _signal_process(
     proc: Process,
-    sig: signal.Signals,
+    sig: signal.Signals | None,
     *,
     fallback: Callable[[], None],
     log_event: str,

@@ -121,7 +121,6 @@ class MockRunner(SessionLockMixin, ResumeTokenMixin, Runner):
                 answer=self._answer,
             )
 
-
     def compact_support(self) -> CompactSupport:
         return COMPACT_NONE
 

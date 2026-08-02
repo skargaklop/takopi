@@ -47,10 +47,7 @@ def test_parse_bare_resume_forms() -> None:
 
 
 def test_strip_engine_resume_prefix() -> None:
-    assert (
-        strip_engine_resume_prefix("resume abc continue", engine="agy")
-        == "continue"
-    )
+    assert strip_engine_resume_prefix("resume abc continue", engine="agy") == "continue"
     assert strip_engine_resume_prefix("agy resume abc continue", engine="agy") == (
         "continue"
     )
@@ -160,9 +157,7 @@ def test_codex_resume_line_strips_from_prompt() -> None:
     assert "sid-9" not in resolved.prompt
 
 
-
 # --- run engine resolution: user resume > reply resume > default ---
-
 
 
 def test_resolve_run_engine_reply_resume_overrides_default() -> None:

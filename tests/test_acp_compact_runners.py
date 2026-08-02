@@ -13,7 +13,9 @@ from takopi.runners.omp import OmpRunner
 
 def _make_transport_with_compact() -> FakeAcpTransport:
     transport = FakeAcpTransport()
-    transport.queue_response("initialize", {"protocolVersion": 1, "agentCapabilities": {"loadSession": True}})
+    transport.queue_response(
+        "initialize", {"protocolVersion": 1, "agentCapabilities": {"loadSession": True}}
+    )
     transport.queue_response("session/load", {})
     transport.queue_response("session/prompt", {"stopReason": "stop"})
     transport.emit_notification(
@@ -25,7 +27,9 @@ def _make_transport_with_compact() -> FakeAcpTransport:
 
 def _make_transport_without_compact() -> FakeAcpTransport:
     transport = FakeAcpTransport()
-    transport.queue_response("initialize", {"protocolVersion": 1, "agentCapabilities": {"loadSession": True}})
+    transport.queue_response(
+        "initialize", {"protocolVersion": 1, "agentCapabilities": {"loadSession": True}}
+    )
     transport.queue_response("session/load", {})
     transport.queue_response("session/prompt", {"stopReason": "stop"})
     transport.emit_notification(
@@ -33,7 +37,6 @@ def _make_transport_without_compact() -> FakeAcpTransport:
         {"availableCommands": [{"name": "edit"}]},
     )
     return transport
-
 
 
 def test_grok_compact_support_is_acp() -> None:
@@ -109,4 +112,6 @@ async def test_omp_compact_when_advertised() -> None:
     assert events[-1].ok is True
 
     prompt_reqs = [r for r in transport.requests if r["method"] == "session/prompt"]
-    assert prompt_reqs[0]["params"]["prompt"][0]["text"] == "/compact preserve decisions"
+    assert (
+        prompt_reqs[0]["params"]["prompt"][0]["text"] == "/compact preserve decisions"
+    )

@@ -214,7 +214,8 @@ async def test_edit_message_text_not_modified_is_success(caplog) -> None:
     assert edited.chat.id == 42
     assert edited.text == "same"
     assert not any(
-        "telegram.http_error" in rec.message or rec.__dict__.get("event") == "telegram.http_error"
+        "telegram.http_error" in rec.message
+        or rec.__dict__.get("event") == "telegram.http_error"
         for rec in caplog.records
     )
     # structlog may put event name in message or as attribute

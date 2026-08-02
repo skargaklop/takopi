@@ -190,7 +190,6 @@ class ProjectSettings(BaseModel):
     chat_id: ChatId | None = None
 
 
-
 class LoggingSettings(BaseModel):
     level: str = "info"
     file: str | None = None

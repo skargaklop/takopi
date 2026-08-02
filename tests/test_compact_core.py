@@ -25,12 +25,15 @@ def test_compact_prompt_formats_optional_instructions() -> None:
 
 
 def test_default_none_support() -> None:
-    assert CompactSupport(
-        mode="none",
-        accepts_instructions=False,
-        true_compaction=False,
-        note="compaction is not supported by this runner",
-    ) == COMPACT_NONE
+    assert (
+        CompactSupport(
+            mode="none",
+            accepts_instructions=False,
+            true_compaction=False,
+            note="compaction is not supported by this runner",
+        )
+        == COMPACT_NONE
+    )
 
 
 def test_handoff_prompt_is_not_labelled_compaction() -> None:
@@ -68,7 +71,9 @@ def test_get_compact_support_returns_none_for_plain_object() -> None:
 def test_get_compact_support_returns_value() -> None:
     class HasCompact:
         def compact_support(self) -> CompactSupport:
-            return CompactSupport(mode="slash_prompt", accepts_instructions=True, true_compaction=True)
+            return CompactSupport(
+                mode="slash_prompt", accepts_instructions=True, true_compaction=True
+            )
 
     support = get_compact_support(HasCompact())
     assert support.mode == "slash_prompt"

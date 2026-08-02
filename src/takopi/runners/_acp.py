@@ -102,7 +102,9 @@ class AcpClient:
         self._initialized = True
 
     async def resume_or_load(self, session_id: str) -> None:
-        caps = self._init_result.get("agentCapabilities", {}) if self._init_result else {}
+        caps = (
+            self._init_result.get("agentCapabilities", {}) if self._init_result else {}
+        )
         if caps.get("loadSession"):
             await self._request("session/load", {"sessionId": session_id})
         else:
@@ -131,13 +133,9 @@ class AcpClient:
 
     async def require_command(self, name: str) -> None:
         if name not in self._available_commands:
-            raise AcpCommandUnavailableError(
-                f"ACP agent did not advertise '{name}'"
-            )
+            raise AcpCommandUnavailableError(f"ACP agent did not advertise '{name}'")
 
-    async def prompt(
-        self, session_id: str, text: str
-    ) -> AsyncIterator[AcpUpdate]:
+    async def prompt(self, session_id: str, text: str) -> AsyncIterator[AcpUpdate]:
         result = await self._request(
             "session/prompt",
             {
@@ -209,7 +207,9 @@ class AcpCompactMixin:
             await client.resume_or_load(resume.value)
             await client.wait_for_available_commands()
             await client.require_command("compact")
-            async for _update in client.prompt(resume.value, compact_prompt(instructions)):
+            async for _update in client.prompt(
+                resume.value, compact_prompt(instructions)
+            ):
                 pass
             yield factory.completed_ok(
                 answer=f"{engine} compaction completed.",

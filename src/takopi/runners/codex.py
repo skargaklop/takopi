@@ -479,7 +479,10 @@ class CodexRunner(SlashCompactMixin, ResumeTokenMixin, JsonlSubprocessRunner):
 
     def command(self) -> str:
         import sys
-        if sys.platform == "win32" and not self.codex_cmd.endswith(".exe") and not self.codex_cmd.endswith(".cmd"):
+
+        if sys.platform == "win32" and not self.codex_cmd.endswith(
+            (".exe", ".cmd", ".bat")
+        ):
             return self.codex_cmd + ".cmd"
         return self.codex_cmd
 
@@ -1401,6 +1404,7 @@ class AppServerCodexRunner(SlashCompactMixin, ResumeTokenMixin, BaseRunner):
 
 def build_runner(config: EngineConfig, config_path: Path) -> Runner:
     import sys
+
     codex_cmd = "codex.cmd" if sys.platform == "win32" else "codex"
 
     mode_value = config.get("mode", "app_server")

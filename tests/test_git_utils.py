@@ -10,8 +10,11 @@ def test_resolve_main_worktree_root_returns_none_when_no_git(monkeypatch) -> Non
     assert resolve_main_worktree_root(Path("/tmp")) is None
 
 
-def test_resolve_main_worktree_root_prefers_common_dir_parent(monkeypatch) -> None:
-    base = Path("/repo")
+def test_resolve_main_worktree_root_prefers_common_dir_parent(
+    tmp_path, monkeypatch
+) -> None:
+    base = tmp_path / "repo"
+    base.mkdir()
 
     def _fake_stdout(args, **kwargs):
         if args[:2] == ["rev-parse", "--path-format=absolute"]:

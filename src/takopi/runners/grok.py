@@ -53,7 +53,9 @@ def _coerce_comma_list(value: Any) -> str | None:
     return text or None
 
 
-def _usage_payload(event: grok_schema.StreamEndEvent | grok_schema.StreamErrorEvent) -> dict[str, Any]:
+def _usage_payload(
+    event: grok_schema.StreamEndEvent | grok_schema.StreamErrorEvent,
+) -> dict[str, Any]:
     usage: dict[str, Any] = {}
     for key in (
         "num_turns",
@@ -86,9 +88,7 @@ def translate_grok_event(
 
     if not state.started:
         state.started = True
-        out.append(
-            state.factory.started(state.resume, title=title, meta=meta or None)
-        )
+        out.append(state.factory.started(state.resume, title=title, meta=meta or None))
 
     match event:
         case grok_schema.StreamTextEvent(data=data):

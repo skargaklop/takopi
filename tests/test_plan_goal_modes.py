@@ -4,7 +4,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from takopi.config import ProjectsConfig
+from takopi.config import ProjectConfig, ProjectsConfig
+from takopi.context import RunContext
+from takopi.directives import (
+    compose_context_line,
+    format_context_line,
+    format_mode_badge,
+)
 from takopi.directives import parse_directives
 from takopi.model import ResumeToken
 from takopi.runners.agy import AgyRunner
@@ -58,9 +64,18 @@ def test_meta_vs_freeform_dispatch_matrix() -> None:
     engines = ("codex", "claude", "agy", "grok")
 
     # Dual-mode: free-form → agent run (not meta)
-    assert should_handle_as_meta_command("plan", "/agy design", engine_ids=engines) is False
-    assert should_handle_as_meta_command("plan", "design auth", engine_ids=engines) is False
-    assert should_handle_as_meta_command("goal", "all tests pass", engine_ids=engines) is False
+    assert (
+        should_handle_as_meta_command("plan", "/agy design", engine_ids=engines)
+        is False
+    )
+    assert (
+        should_handle_as_meta_command("plan", "design auth", engine_ids=engines)
+        is False
+    )
+    assert (
+        should_handle_as_meta_command("goal", "all tests pass", engine_ids=engines)
+        is False
+    )
     # Dual-mode sticky/help stays meta
     assert should_handle_as_meta_command("plan", "", engine_ids=engines) is True
     assert should_handle_as_meta_command("plan", "on", engine_ids=engines) is True
@@ -227,7 +242,9 @@ def test_claude_goal_keeps_existing_goal_prefix() -> None:
 
 def test_grok_plan_permission_mode_no_yolo() -> None:
     runner = GrokRunner(grok_cmd="grok", yolo=True)
-    state = GrokStreamState(resume=ResumeToken(engine="grok", value="sid"), started=False)
+    state = GrokStreamState(
+        resume=ResumeToken(engine="grok", value="sid"), started=False
+    )
     with apply_run_options(EngineRunOptions(plan=True)):
         args = runner.build_args("plan the refactor", None, state=state)
     assert "--permission-mode" in args
@@ -237,7 +254,9 @@ def test_grok_plan_permission_mode_no_yolo() -> None:
 
 def test_grok_goal_prefixes_prompt() -> None:
     runner = GrokRunner(grok_cmd="grok", yolo=True)
-    state = GrokStreamState(resume=ResumeToken(engine="grok", value="sid"), started=False)
+    state = GrokStreamState(
+        resume=ResumeToken(engine="grok", value="sid"), started=False
+    )
     with apply_run_options(EngineRunOptions(goal="lint clean")):
         args = runner.build_args("body", None, state=state)
     # -p prompt is early in args
@@ -345,9 +364,8 @@ def test_progress_queued_not_steerable_cancel_only() -> None:
 
 # --- mode badge + footer composition (plan/goal indicator) ---
 
-from takopi.config import ProjectConfig
-from takopi.context import RunContext
-from takopi.directives import compose_context_line, format_context_line, format_mode_badge
+
+# (imports moved to top of file)
 
 
 def _projects_with(alias: str = "z80") -> ProjectsConfig:

@@ -100,7 +100,6 @@ class AgyRunner(ResumeTokenMixin, BaseRunner):
     def is_resume_line(self, line: str) -> bool:
         return bool(_RESUME_LINE_RE.match(line))
 
-
     def compact_support(self) -> CompactSupport:
         return CompactSupport(
             mode="handoff_only",

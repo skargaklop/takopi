@@ -327,6 +327,7 @@ class PiRunner(SlashCompactMixin, ResumeTokenMixin, JsonlSubprocessRunner):
 
     def command(self) -> str:
         import sys
+
         return "pi.cmd" if sys.platform == "win32" else "pi"
 
     def _resolve_session_path(self, session_id: str) -> str:
@@ -335,7 +336,10 @@ class PiRunner(SlashCompactMixin, ResumeTokenMixin, JsonlSubprocessRunner):
         if _looks_like_session_path(session_id):
             return session_id
         from pathlib import Path as _Path
-        agent_dir = _Path(os.environ.get("PI_CODING_AGENT_DIR", "~/.pi/agent")).expanduser()
+
+        agent_dir = _Path(
+            os.environ.get("PI_CODING_AGENT_DIR", "~/.pi/agent")
+        ).expanduser()
         sessions_root = agent_dir / "sessions"
         if not sessions_root.is_dir():
             return session_id

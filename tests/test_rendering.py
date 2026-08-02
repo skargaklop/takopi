@@ -122,7 +122,8 @@ Mix: **bold**, *italic*, `code`, and a [link](https://telegram.org/).
         assert required in types, f"missing entity type {required}: {types}"
 
     assert any(
-        e.get("type") == "text_link" and e.get("url") == "https://x.ai/" for e in entities
+        e.get("type") == "text_link" and e.get("url") == "https://x.ai/"
+        for e in entities
     )
     assert any(
         e.get("type") == "text_link" and e.get("url") == "https://telegram.org/"

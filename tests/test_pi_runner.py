@@ -42,11 +42,13 @@ def test_pi_resume_format_and_extract(tmp_path: Path) -> None:
         provider=None,
     )
     session_path = tmp_path / "session.jsonl"
-    token = ResumeToken(engine=ENGINE, value=str(session_path))
+    session_str = str(session_path)
+    token = ResumeToken(engine=ENGINE, value=session_str)
 
-    assert runner.format_resume(token) == f"`pi --session {session_path}`"
-    assert runner.extract_resume(f"`pi --session {session_path}`") == token
-    assert runner.extract_resume(f'pi --session "{session_path}"') == token
+    expected_session = f'"{session_str}"' if " " in session_str else session_str
+    assert runner.format_resume(token) == f"`pi --session {expected_session}`"
+    assert runner.extract_resume(f"`pi --session {expected_session}`") == token
+    assert runner.extract_resume(f'pi --session "{session_str}"') == token
     assert runner.extract_resume("`codex resume sid`") is None
 
     spaced_path = tmp_path / "pi session.jsonl"
@@ -188,14 +190,16 @@ def test_session_id_promotion_from_stdout() -> None:
 
 def test_extract_resume_keeps_session_path(tmp_path: Path) -> None:
     session_path = tmp_path / "session.jsonl"
+    session_str = str(session_path)
     runner = PiRunner(
         extra_args=[],
         model=None,
         provider=None,
     )
-    token = runner.extract_resume(f"pi --session {session_path}")
+    quoted = f'"{session_str}"' if " " in session_str else session_str
+    token = runner.extract_resume(f"pi --session {quoted}")
     assert token is not None
-    assert token.value == str(session_path)
+    assert token.value == session_str
 
 
 def test_omp_build_args_invokes_omp_directly(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -235,6 +239,7 @@ def test_omp_build_args_invokes_omp_directly(monkeypatch: pytest.MonkeyPatch) ->
         "session-123",
         "hello",
     ]
+
 
 def test_omp_backend_metadata_documents_terminal_command() -> None:
     assert OMP_BACKEND.id == OMP_ENGINE
@@ -341,7 +346,6 @@ def test_session_path_sanitizes_windows_separators() -> None:
     assert ":" not in name
 
 
-
 def test_pi_multiline_prompt_goes_via_stdin() -> None:
     """Multi-line prompts must be sent via stdin, not as a CLI arg.
 
@@ -369,4 +373,3 @@ def test_pi_single_line_prompt_stays_as_arg() -> None:
     payload = runner.stdin_payload(prompt, None, state=state)
     assert args[-1] == prompt
     assert payload is None
-

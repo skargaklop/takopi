@@ -243,8 +243,8 @@ def setup_logging(
     _PIPELINE_LEVEL_NAME = "info" if trace_pipeline else "debug"
 
     format_value = (
-        os.environ.get("TAKOPI_LOG_FORMAT") or format or "console"
-    ).strip().lower()
+        (os.environ.get("TAKOPI_LOG_FORMAT") or format or "console").strip().lower()
+    )
     color_override = os.environ.get("TAKOPI_LOG_COLOR")
     is_tty = sys.stdout.isatty() if color_override is None else _truthy(color_override)
     if format_value == "json":

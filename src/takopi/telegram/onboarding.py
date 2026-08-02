@@ -178,7 +178,7 @@ class Services(Protocol):
 def display_path(path: Path) -> str:
     home = Path.home()
     try:
-        return f"~/{path.relative_to(home)}"
+        return f"~/{path.relative_to(home).as_posix()}"
     except ValueError:
         return str(path)
 

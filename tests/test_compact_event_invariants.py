@@ -12,7 +12,9 @@ def assert_compact_event_invariants(events: list[TakopiEvent]) -> None:
     started = [e for e in events if isinstance(e, StartedEvent)]
     completed = [e for e in events if isinstance(e, CompletedEvent)]
     assert len(started) == 1, f"expected exactly 1 StartedEvent, got {len(started)}"
-    assert len(completed) == 1, f"expected exactly 1 CompletedEvent, got {len(completed)}"
+    assert len(completed) == 1, (
+        f"expected exactly 1 CompletedEvent, got {len(completed)}"
+    )
     assert events[-1] is completed[0]
     assert completed[0].resume == started[0].resume
 
@@ -67,7 +69,9 @@ async def test_acp_compact_event_invariants() -> None:
     from takopi.runners.grok import GrokRunner
 
     transport = FakeAcpTransport()
-    transport.queue_response("initialize", {"protocolVersion": 1, "agentCapabilities": {"loadSession": True}})
+    transport.queue_response(
+        "initialize", {"protocolVersion": 1, "agentCapabilities": {"loadSession": True}}
+    )
     transport.queue_response("session/load", {})
     transport.queue_response("session/prompt", {"stopReason": "stop"})
     transport.emit_notification(
@@ -89,7 +93,9 @@ async def test_acp_compact_not_advertised_emits_failed_event() -> None:
     from takopi.runners.grok import GrokRunner
 
     transport = FakeAcpTransport()
-    transport.queue_response("initialize", {"protocolVersion": 1, "agentCapabilities": {"loadSession": True}})
+    transport.queue_response(
+        "initialize", {"protocolVersion": 1, "agentCapabilities": {"loadSession": True}}
+    )
     transport.queue_response("session/load", {})
     transport.emit_notification(
         "available_commands_update",
@@ -136,7 +142,9 @@ async def test_compact_serializes_with_active_run_same_resume() -> None:
 
     async def run_job(job: ThreadJob) -> None:
         if job.kind == "compact":
-            async for _event in runner.compact(job.resume_token, job.compact_instructions):
+            async for _event in runner.compact(
+                job.resume_token, job.compact_instructions
+            ):
                 pass
         else:
             async for _event in runner.run(job.text, job.resume_token):

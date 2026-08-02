@@ -10,7 +10,6 @@ from takopi.outbound_files import (
     parse_send_markers,
     process_outbound_answer,
     settings_from_files_config,
-    write_plan_auto_file,
 )
 from takopi.settings import TelegramFilesSettings
 

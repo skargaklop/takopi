@@ -1056,10 +1056,7 @@ class PromptInputBatcher:
     @staticmethod
     def _joined_len(parts: list[PromptBatchPart], separator: str) -> int:
         sep_len = 1 if separator == "newline" else 2
-        return (
-            sum(len(part.text) for part in parts)
-            + sep_len * max(0, len(parts) - 1)
-        )
+        return sum(len(part.text) for part in parts) + sep_len * max(0, len(parts) - 1)
 
     def _reschedule(self, key: PromptBatchKey, state: PromptBatchState) -> None:
         state.token += 1
@@ -1245,9 +1242,7 @@ class ResumeResolver:
             )
             if stored is not None:
                 stored_token = stored
-        return ResumeDecision(
-            resume_token=stored_token, handled_by_running_task=False
-        )
+        return ResumeDecision(resume_token=stored_token, handled_by_running_task=False)
 
 
 class MediaGroupBuffer:
@@ -1396,9 +1391,7 @@ async def _send_queued_progress(
 ) -> MessageRef | None:
     tracker = ProgressTracker(engine=resume_token.engine)
     tracker.set_resume(resume_token)
-    context_line = cfg.runtime.compose_context_line(
-        context, plan=plan, goal=goal
-    )
+    context_line = cfg.runtime.compose_context_line(context, plan=plan, goal=goal)
     resume_formatter = None
     if should_show_resume_line(
         show_resume_line=cfg.show_resume_line,
@@ -2184,9 +2177,7 @@ async def run_main_loop(
             prompt_batcher = PromptInputBatcher(
                 task_group=tg,
                 debounce_s=(
-                    state.prompt_batch_debounce_s
-                    if state.prompt_batch_enabled
-                    else 0.0
+                    state.prompt_batch_debounce_s if state.prompt_batch_enabled else 0.0
                 ),
                 sleep=sleep,
                 dispatch=_dispatch_batched_prompt,
@@ -2220,7 +2211,10 @@ async def run_main_loop(
                 # Prefer ambient context for upload root (topic/chat project);
                 # re-resolve inside save_file_put still honors default_project.
                 ambient_for_save = ambient_context
-                if resolved.context is not None and resolved.context.project is not None:
+                if (
+                    resolved.context is not None
+                    and resolved.context.project is not None
+                ):
                     ambient_for_save = resolved.context
                 saved = await save_file_put(
                     cfg,
