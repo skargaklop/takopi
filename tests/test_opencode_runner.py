@@ -345,6 +345,26 @@ def test_stdin_payload_returns_none() -> None:
     assert payload is None
 
 
+def test_build_args_with_print_logs() -> None:
+    runner = OpenCodeRunner(
+        opencode_cmd="opencode", print_logs=True, log_level="DEBUG"
+    )
+    args = runner.build_args("hello", None, state=OpenCodeStreamState())
+    assert "--print-logs" in args
+    assert "--log-level" in args
+    idx = args.index("--log-level")
+    assert args[idx + 1] == "DEBUG"
+    # Prompt still last after --
+    assert args[-2:] == ["--", "hello"]
+
+
+def test_build_args_without_print_logs() -> None:
+    runner = OpenCodeRunner(opencode_cmd="opencode")
+    args = runner.build_args("hello", None, state=OpenCodeStreamState())
+    assert "--print-logs" not in args
+    assert "--log-level" not in args
+
+
 @pytest.mark.anyio
 async def test_run_serializes_same_session() -> None:
     runner = OpenCodeRunner(opencode_cmd="opencode")

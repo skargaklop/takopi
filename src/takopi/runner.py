@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import subprocess
@@ -139,6 +140,17 @@ class BaseRunner(SessionLockMixin):
         raise NotImplementedError
 
 
+def _prompt_fingerprint(prompt: str) -> str:
+    """Return a short SHA-256 fingerprint for diagnostic logging."""
+    return hashlib.sha256(prompt.encode()).hexdigest()[:12]
+
+
+def _safe_preview(prompt: str, max_len: int = 60) -> str:
+    """Return a single-line preview of *prompt*, truncated to *max_len* chars."""
+    preview = prompt.replace("\n", " ").strip()
+    return preview[:max_len] + ("…" if len(preview) > max_len else "")
+
+
 @dataclass(slots=True)
 class JsonlRunState:
     note_seq: int = 0
@@ -154,6 +166,9 @@ class JsonlStreamState:
 
 
 class JsonlSubprocessRunner(BaseRunner):
+    startup_timeout_s: float | None = None
+    idle_timeout_s: float | None = None
+
     def get_logger(self) -> Any:
         return getattr(self, "logger", get_logger(__name__))
 
@@ -256,6 +271,38 @@ class JsonlSubprocessRunner(BaseRunner):
     ) -> AsyncIterator[bytes]:
         async for raw_line in iter_bytes_lines(stream):
             yield raw_line.rstrip(b"\n")
+
+    async def _iter_jsonl_with_timeouts(
+        self,
+        stdout: Any,
+        *,
+        startup_timeout_s: float,
+        idle_timeout_s: float,
+    ) -> AsyncIterator[bytes]:
+        """Yield JSONL lines, enforcing startup and idle timeouts per read.
+
+        The first read uses ``startup_timeout_s``; subsequent reads use
+        ``idle_timeout_s``. If a read times out, iteration stops silently
+        — the caller decides what to emit based on how many lines were
+        produced.
+        """
+        gen = self.iter_json_lines(stdout)
+        first = True
+        while True:
+            timeout = startup_timeout_s if first else idle_timeout_s
+            exhausted = False
+            with anyio.move_on_after(timeout) as scope:
+                try:
+                    raw = await gen.__anext__()
+                except StopAsyncIteration:
+                    exhausted = True
+                    raw = b""
+                first = False
+                if not exhausted:
+                    yield raw
+                    continue
+            if scope.cancel_called or exhausted:
+                return
 
     def decode_error_events(
         self,
@@ -594,8 +641,20 @@ class JsonlSubprocessRunner(BaseRunner):
         resume: ResumeToken | None,
         logger: Any,
         pid: int,
+        startup_timeout_s: float | None = None,
+        idle_timeout_s: float | None = None,
     ) -> AsyncIterator[TakopiEvent]:
-        async for raw_line in self.iter_json_lines(stdout):
+        if startup_timeout_s is not None and idle_timeout_s is not None:
+            line_iter: AsyncIterator[bytes] = self._iter_jsonl_with_timeouts(
+                stdout,
+                startup_timeout_s=startup_timeout_s,
+                idle_timeout_s=idle_timeout_s,
+            )
+        else:
+            line_iter = self.iter_json_lines(stdout)
+        got_any = False
+        async for raw_line in line_iter:
+            got_any = True
             for evt in self._handle_jsonl_line(
                 raw_line=raw_line,
                 stream=stream,
@@ -605,6 +664,25 @@ class JsonlSubprocessRunner(BaseRunner):
                 pid=pid,
             ):
                 yield evt
+        if (
+            not got_any
+            and not stream.did_emit_completed
+            and startup_timeout_s is not None
+        ):
+            tag = self.tag()
+            yield self.note_event(
+                f"{tag} produced no JSON events within "
+                f"{startup_timeout_s:.0f}s; prompt was spawned but no "
+                "session started",
+                state=state,
+            )
+            yield CompletedEvent(
+                engine=self.engine,
+                resume=resume,
+                ok=False,
+                answer="",
+                error="startup timeout",
+            )
 
     async def run_impl(
         self, prompt: str, resume: ResumeToken | None
@@ -623,6 +701,8 @@ class JsonlSubprocessRunner(BaseRunner):
             resume=resume.value if resume else None,
             prompt=prompt,
             prompt_len=len(prompt),
+            prompt_sha256=_prompt_fingerprint(prompt),
+            prompt_preview=_safe_preview(prompt),
         )
 
         cwd = get_run_base_dir()
@@ -666,6 +746,8 @@ class JsonlSubprocessRunner(BaseRunner):
                     resume=resume,
                     logger=logger,
                     pid=proc.pid,
+                    startup_timeout_s=self.startup_timeout_s,
+                    idle_timeout_s=self.idle_timeout_s,
                 ):
                     yield evt
 

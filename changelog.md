@@ -6,7 +6,12 @@
 
 - runner compaction protocol: runners MAY implement `compact_support()` and `compact()` to participate in `/compact`. Five modes: `slash_prompt` (claude, pi, codex), `native_api` (opencode), `acp` (grok, omp), `handoff_only` (agy), `none`. Compact jobs serialize on the same `ThreadScheduler` as prompt jobs. See [specification §5.7](reference/specification.md#57-runner-compaction-protocol-may).
 - show a `plan` or `goal` mode badge in the Telegram message footer, preceding the `ctx:` line, so active plan/goal runs are visible at a glance.
-- `[logging]` config section for persistent log output: `level`, `file`, and `format` keys in `takopi.toml` set the log level, file destination, and output format (console/json). Env vars (`TAKOPI_LOG_*`) still override; `--debug` overrides both. Relative log file paths resolve against `~/.takopi/`.
+- global `[runners]` config section: `startup_timeout_s` (60s default), `idle_timeout_s` (900s default), `kill_tree_on_cancel` (true default). Applied to all runners uniformly, never duplicated per engine.
+- process-tree cleanup on cancellation: Windows now uses `taskkill /T /F` to kill the entire subprocess tree (POSIX already uses process groups via `os.killpg`). Fixes orphaned `opencode.exe` / MCP server processes surviving cancellation.
+- codex app-server cleanup: `_AppServerClient.stop()` method terminates the app-server process tree on stdout-close or shutdown; previously the process was never killed.
+- `CREATE_NEW_PROCESS_GROUP` flag on Windows subprocess creation, mirroring POSIX `start_new_session=True`.
+- `[opencode] print_logs` and `[opencode] log_level` config keys to pass `--print-logs` and `--log-level` to the OpenCode CLI.
+- `takopi doctor` now reports runner processes (codex, claude, opencode, etc.) and flags potential orphaned processes.
 
 ### changes
 

@@ -5,6 +5,7 @@ import sys
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
+import subprocess
 from typing import Literal
 
 import anyio
@@ -107,6 +108,117 @@ async def _doctor_telegram_checks(
         await bot.close()
     return checks
 
+_RUNNER_PROCESS_NAMES: tuple[str, ...] = (
+    "codex", "claude", "opencode", "pi", "agy", "grok", "omp", "node",
+)
+
+
+@dataclass(frozen=True, slots=True)
+class ProcInfo:
+    pid: int
+    ppid: int
+    name: str
+    cmdline: str
+
+
+def _list_runner_processes() -> list[ProcInfo]:
+    """List running processes matching known runner commands.
+
+    Cross-platform: uses ``wmic`` on Windows, ``ps`` on POSIX.
+    Read-only — never kills anything.
+    """
+    if os.name == "nt":
+        try:
+            result = subprocess.run(
+                [
+                    "wmic", "process", "get",
+                    "ProcessId,ParentProcessId,Name,CommandLine",
+                    "/format:csv",
+                ],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=10,
+            )
+        except FileNotFoundError:
+            return []
+        return _parse_wmic_csv(result.stdout)
+    try:
+        result = subprocess.run(
+            ["ps", "axo", "pid,ppid,comm,args"],
+            capture_output=True, text=True, timeout=10,
+        )
+    except FileNotFoundError:
+        return []
+    return _parse_ps_output(result.stdout)
+
+
+def _parse_wmic_csv(output: str) -> list[ProcInfo]:
+    import csv
+
+    procs: list[ProcInfo] = []
+    reader = csv.DictReader(output.splitlines())
+    for row in reader:
+        name = (row.get("Name") or "").strip()
+        if not any(
+            name.lower() == n or name.lower().startswith(n)
+            for n in _RUNNER_PROCESS_NAMES
+        ):
+            continue
+        try:
+            pid = int(row.get("ProcessId", "0"))
+            ppid = int(row.get("ParentProcessId", "0"))
+        except ValueError:
+            continue
+        cmdline = (row.get("CommandLine") or "").strip()
+        if pid:
+            procs.append(ProcInfo(pid=pid, ppid=ppid, name=name, cmdline=cmdline))
+    return procs
+
+
+def _parse_ps_output(output: str) -> list[ProcInfo]:
+    procs: list[ProcInfo] = []
+    for line in output.splitlines()[1:]:
+        parts = line.split(None, 3)
+        if len(parts) < 3:
+            continue
+        try:
+            pid = int(parts[0])
+            ppid = int(parts[1])
+        except ValueError:
+            continue
+        name = parts[2]
+        cmdline = parts[3] if len(parts) > 3 else name
+        if not any(
+            name == n or name.startswith(n) or f"/{n}" in cmdline
+            for n in _RUNNER_PROCESS_NAMES
+        ):
+            continue
+        procs.append(ProcInfo(pid=pid, ppid=ppid, name=name, cmdline=cmdline))
+    return procs
+
+
+def _doctor_runner_processes() -> list[DoctorCheck]:
+    """Check for runner processes, flagging potential orphans."""
+    procs = _list_runner_processes()
+    if not procs:
+        return [DoctorCheck("runner processes", "ok", "none found")]
+    # Group by process name
+    by_name: dict[str, list[ProcInfo]] = {}
+    for p in procs:
+        key = p.name.lower().split(".")[0].split("-")[0]
+        by_name.setdefault(key, []).append(p)
+    lines: list[str] = []
+    for name, group in sorted(by_name.items()):
+        pids = ", ".join(str(p.pid) for p in group)
+        lines.append(f"  {name}: {len(group)} process(es), PIDs: [{pids}]")
+    return [DoctorCheck(
+        "runner processes", "warning",
+        f"{len(procs)} process(es) running\n" + "\n".join(lines),
+    )]
+
+
 
 def run_doctor(
     *,
@@ -164,6 +276,7 @@ def run_doctor(
         *telegram_checks_result,
         *file_checks(tg),
         *voice_checks(tg),
+        *_doctor_runner_processes(),
     ]
     typer.echo("takopi doctor")
     for check in checks:

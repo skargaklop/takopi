@@ -137,7 +137,7 @@ def build_router(
             else:
                 status = "load_error"
                 warnings.append(f"{engine_id}: {issue}")
-                continue
+
 
         cmd = backend.cli_cmd or backend.id
         if not _cli_is_available(cmd, runner):
@@ -161,6 +161,13 @@ def build_router(
                 issue=issue,
             )
         )
+
+        # Apply global runner lifecycle settings (timeouts).
+        runner_settings = settings.runners
+        if hasattr(runner, "startup_timeout_s"):
+            runner.startup_timeout_s = runner_settings.startup_timeout_s  # type: ignore[attr-defined]
+        if hasattr(runner, "idle_timeout_s"):
+            runner.idle_timeout_s = runner_settings.idle_timeout_s  # type: ignore[attr-defined]
 
     for warning in warnings:
         logger.warning("setup.warning", issue=warning)

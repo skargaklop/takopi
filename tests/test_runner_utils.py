@@ -2,6 +2,7 @@ import re
 from collections.abc import AsyncIterator
 from typing import Any
 
+import anyio
 import pytest
 
 import takopi.runner as runner_module
@@ -413,3 +414,150 @@ async def test_jsonl_run_impl_branches(monkeypatch: pytest.MonkeyPatch) -> None:
     runner = _BranchingJsonlRunner()
     events = [evt async for evt in runner.run_impl("hello", None)]
     assert any(isinstance(evt, CompletedEvent) for evt in events)
+
+
+
+def test_prompt_fingerprint_length() -> None:
+    fp = runner_module._prompt_fingerprint("hello world")
+    assert len(fp) == 12
+    assert all(c in "0123456789abcdef" for c in fp)
+
+
+def test_prompt_fingerprint_deterministic() -> None:
+    assert (
+        runner_module._prompt_fingerprint("test")
+        == runner_module._prompt_fingerprint("test")
+    )
+    assert (
+        runner_module._prompt_fingerprint("a")
+        != runner_module._prompt_fingerprint("b")
+    )
+
+
+def test_safe_preview_short() -> None:
+    assert runner_module._safe_preview("hello") == "hello"
+
+
+def test_safe_preview_truncates() -> None:
+    long = "x" * 100
+    result = runner_module._safe_preview(long, max_len=10)
+    assert result == "xxxxxxxxxx…"
+
+
+def test_safe_preview_collapses_newlines() -> None:
+    assert runner_module._safe_preview("line1\nline2\nline3") == "line1 line2 line3"
+
+
+@pytest.mark.anyio
+async def test_iter_jsonl_startup_timeout_no_output() -> None:
+    """If no JSONL arrives within startup_timeout_s, emit a failure event."""
+    from collections.abc import AsyncIterator  # noqa: F401
+
+    class _SlowRunner(_DummyJsonlRunner):
+        async def iter_json_lines(self, stream: Any) -> AsyncIterator[bytes]:
+            # Never produces output
+            await anyio.sleep(300)
+            return  # type: ignore[unreachable]
+            yield b""  # type: ignore[unreachable]
+
+    runner = _SlowRunner()
+    runner.startup_timeout_s = 0.1
+    runner.idle_timeout_s = 0.1
+    stream = runner_module.JsonlStreamState(expected_session=None)
+    state = runner_module.JsonlRunState()
+    events = [
+        evt
+        async for evt in runner._iter_jsonl_events(
+            stdout=None,
+            stream=stream,
+            state=state,
+            resume=None,
+            logger=None,
+            pid=0,
+            startup_timeout_s=0.1,
+            idle_timeout_s=0.1,
+        )
+    ]
+    assert any(
+        isinstance(evt, CompletedEvent) and not evt.ok for evt in events
+    ), f"expected failed completion, got {events}"
+
+
+@pytest.mark.anyio
+async def test_iter_jsonl_normal_stream_ignores_timeouts() -> None:
+    """A normal stream with events should complete regardless of timeouts."""
+    from collections.abc import AsyncIterator  # noqa: F401
+
+    class _FastRunner(_DummyJsonlRunner):
+        async def iter_json_lines(self, stream: Any) -> AsyncIterator[bytes]:
+            for line in [b'{"type": "test"}', b'{"type": "done"}']:
+                yield line
+
+    runner = _FastRunner()
+    runner.startup_timeout_s = 10.0
+    runner.idle_timeout_s = 10.0
+    stream = runner_module.JsonlStreamState(expected_session=None)
+    state = runner_module.JsonlRunState()
+    events = [
+        evt
+        async for evt in runner._iter_jsonl_events(
+            stdout=None,
+            stream=stream,
+            state=state,
+            resume=None,
+            logger=None,
+            pid=0,
+            startup_timeout_s=10.0,
+            idle_timeout_s=10.0,
+        )
+    ]
+    # Should process lines without timing out — events may be empty if
+    # the dummy runner ignores unknown JSON, but it must not hang.
+    # The key assertion: no timeout error event is emitted.
+    assert not any(
+        isinstance(evt, CompletedEvent) and not evt.ok for evt in events
+    ), f"unexpected timeout on normal stream: {events}"
+
+
+@pytest.mark.anyio
+async def test_lock_released_after_cancel() -> None:
+    """The resume lock must release after cancellation, not stay held."""
+    runner = _DummyRunner()
+    token = ResumeToken(engine="dummy", value="ses_test")
+
+    async def slow_run(prompt, resume):
+        yield StartedEvent(
+            engine="dummy", resume=resume, title="test", meta={}
+        )
+        await anyio.sleep(300)
+        yield CompletedEvent(
+            engine="dummy", resume=resume, ok=True, answer="ok"
+        )
+
+    runner.run_impl = slow_run  # type: ignore[assignment]
+
+    async def drain(prompt, resume):
+        async for _ in runner.run(prompt, resume):
+            pass
+
+    # Start and cancel
+    with anyio.move_on_after(0.2):
+        async with anyio.create_task_group() as tg:
+            tg.start_soon(drain, "first", token)
+            await anyio.sleep(0.05)
+            tg.cancel_scope.cancel()
+
+    # Lock should be released — second run starts immediately
+    started = anyio.Event()
+
+    async def quick_run(prompt, resume):
+        started.set()
+        yield CompletedEvent(
+            engine="dummy", resume=resume, ok=True, answer="ok"
+        )
+
+    runner.run_impl = quick_run  # type: ignore[assignment]
+    with anyio.fail_after(2):
+        async for _ in runner.run("second", token):
+            pass
+    assert started.is_set()

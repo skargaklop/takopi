@@ -26,6 +26,11 @@ from .run_options import get_run_options
 from ..schemas import codex as codex_schema
 from ..utils.paths import get_run_base_dir, relativize_command
 from ..utils.streams import drain_stderr, iter_bytes_lines
+from ..utils.subprocess import (
+    kill_process_tree,
+    terminate_process,
+    wait_for_process,
+)
 
 logger = get_logger(__name__)
 
@@ -746,6 +751,8 @@ class _AppServerClient:
             }
             if os.name == "posix":
                 kwargs["start_new_session"] = True
+            elif os.name == "nt":
+                kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
             self._proc = await anyio.open_process(cmd, **kwargs)
 
             if (
@@ -774,6 +781,36 @@ class _AppServerClient:
             if not isinstance(result, dict):
                 raise RuntimeError("codex app-server initialize returned non-object")
             await self.notify("initialized", {})
+
+    async def stop(self) -> None:
+        """Terminate the app-server process and its entire tree.
+
+        Safe to call multiple times: no-ops once ``self._proc`` is cleared.
+        Does NOT acquire ``_start_lock`` to avoid deadlock when called
+        from ``_reader_loop`` (which runs inside ``start()``'s lock scope).
+        Uses ``_state_lock`` for the ``_proc`` swap instead.
+        """
+        async with self._state_lock:
+            proc = self._proc
+            if proc is None:
+                return
+            self._proc = None
+            self._loaded_threads.clear()
+        if proc.returncode is None:
+            with anyio.CancelScope(shield=True):
+                if os.name == "nt":
+                    await kill_process_tree(proc)
+                    await proc.wait()
+                else:
+                    terminate_process(proc)
+                    timed_out = await wait_for_process(proc, timeout=2.0)
+                    if timed_out:
+                        await kill_process_tree(proc)
+                        await proc.wait()
+        # Only cancel stderr task — reader task may be the caller of stop().
+        if self._stderr_task is not None and not self._stderr_task.done():
+            self._stderr_task.cancel()
+        self._stderr_task = None
 
     async def notify(self, method: str, params: dict[str, Any] | None = None) -> None:
         await self._write({"method": method, "params": params or {}})
@@ -897,10 +934,7 @@ class _AppServerClient:
             failure = exc
         if failure is None:
             failure = RuntimeError("codex app-server closed stdout")
-        async with self._state_lock:
-            if self._proc is proc:
-                self._proc = None
-                self._loaded_threads.clear()
+        await self.stop()
         await self._fail_all(failure)
 
     def _handle_server_request(self, message: dict[str, Any]) -> dict[str, Any]:

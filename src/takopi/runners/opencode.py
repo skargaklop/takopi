@@ -326,6 +326,8 @@ class OpenCodeRunner(ResumeTokenMixin, JsonlSubprocessRunner):
     compact_api_base_url: str | None = None
     compact_http_client: Any = None
     compact_wait: bool = True
+    print_logs: bool = False
+    log_level: str | None = None
     logger = logger
 
     def format_resume(self, token: ResumeToken) -> str:
@@ -427,6 +429,10 @@ class OpenCodeRunner(ResumeTokenMixin, JsonlSubprocessRunner):
             model = run_options.model
         if model is not None:
             args.extend(["--model", str(model)])
+        if self.print_logs:
+            args.append("--print-logs")
+        if self.log_level:
+            args.extend(["--log-level", self.log_level])
         if plan and self.plan_agent:
             args.extend(["--agent", str(self.plan_agent)])
         if _NUMERIC_PROMPT_RE.fullmatch(prompt):
@@ -590,11 +596,20 @@ def build_runner(config: EngineConfig, config_path: Path) -> Runner:
             f"Invalid `opencode.plan_agent` in {config_path}; expected a string."
         )
 
+    print_logs = bool(config.get("print_logs", False))
+    log_level = config.get("log_level")
+    if log_level is not None and not isinstance(log_level, str):
+        raise ConfigError(
+            f"Invalid `opencode.log_level` in {config_path}; expected a string."
+        )
+
     return OpenCodeRunner(
         opencode_cmd=opencode_cmd,
         model=model,
         plan_agent=plan_agent,
         session_title=title,
+        print_logs=print_logs,
+        log_level=log_level,
     )
 
 

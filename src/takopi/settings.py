@@ -220,6 +220,20 @@ class LoggingSettings(BaseModel):
         return normalized
 
 
+class RunnerSettings(BaseModel):
+    """Global lifecycle settings applied to ALL runners.
+
+    Lives under the ``[runners]`` table in the global Takopi config.
+    Never duplicated per engine.
+    """
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    startup_timeout_s: float = 60.0
+    idle_timeout_s: float = 900.0
+    kill_tree_on_cancel: bool = True
+
+
 class TakopiSettings(BaseSettings):
     model_config = SettingsConfigDict(
         extra="allow",
@@ -238,6 +252,7 @@ class TakopiSettings(BaseSettings):
 
     plugins: PluginsSettings = Field(default_factory=PluginsSettings)
     logging: LoggingSettings = Field(default_factory=LoggingSettings)
+    runners: RunnerSettings = Field(default_factory=RunnerSettings)
 
     @model_validator(mode="before")
     @classmethod
