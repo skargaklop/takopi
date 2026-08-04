@@ -44,8 +44,8 @@ Takopi enqueues a compact job on the same per-thread scheduler as normal prompts
 | pi | `slash_prompt` | yes | yes |
 | codex | `slash_prompt` | yes | no |
 | opencode | `native_api` | yes | no |
-| grok | `acp` | yes | yes |
-| omp | `acp` | yes | yes |
+| grok | `handoff_only` | no (handoff summary) | yes |
+| omp | `handoff_only` | no (handoff summary) | yes |
 | agy | `handoff_only` | no (handoff summary) | yes |
 
 ### Slash-prompt compaction (claude, pi, codex)
@@ -56,13 +56,11 @@ Takopi sends `/compact [instructions]` as a normal prompt to the runner. The eng
 
 Takopi calls the OpenCode server's session compact endpoint directly (`POST /api/session/<id>/compact`), then waits for completion.
 
-### ACP compaction (grok, omp)
+### Handoff-only compaction (grok, omp, agy)
 
-Takopi connects to the engine's ACP (Agent Client Protocol) stdio interface, initializes, loads/resumes the session, checks that the `compact` command is advertised, and sends `/compact` via `session/prompt`. If the engine does not advertise `compact`, the job fails with a user-visible error.
+These engines do not have a verified true compact command. Instead, Takopi sends a handoff-summary prompt that asks the agent to summarize the session for continuation. This is **not real compaction** — the agent is told not to claim that compaction occurred.
 
-### Handoff-only (agy)
-
-Antigravity has no verified true compact command. Instead, Takopi sends a handoff-summary prompt that asks the agent to summarize the session for continuation. This is **not real compaction** — the agent is told not to claim that compaction occurred.
+An ACP-based compact path exists in the codebase (`_acp.py`) but is test-only until a subprocess transport is implemented. When available, grok and omp may return to ACP-based true compaction.
 
 ## When instructions are not supported
 
@@ -80,3 +78,31 @@ The confirmation ensures you know that the agent will not perform native compact
 Third-party runners can implement compaction by providing `compact_support()` and `compact()` methods. See the [plugin API reference](../reference/plugin-api.md#compaction) for details.
 
 Runners without compaction support are handled gracefully — Takopi reports that the engine does not support compact.
+
+## Troubleshooting: nothing happens
+
+If `/compact` produces no visible result (no ack, no completion, no error):
+
+1. **Stale installed artifact.** The bridge process may be running an older build. Rebuild:
+
+   ```powershell
+   uv tool uninstall takopi
+   uv tool install --no-cache .
+   ```
+
+2. **Verify the artifact:**
+
+   ```powershell
+   # Check that the new code is present in site-packages
+   Select-String -Path "%APPDATA%\uv\tools\takopi\Lib\site-packages\takopi\telegram\loop.py" -Pattern "parse_compact_invocation"
+   # Check file dates are today
+   Get-ChildItem "%APPDATA%\uv\tools\takopi\Lib\site-packages\takopi\telegram\commands\compact.py" | Select-Object LastWriteTime
+   ```
+
+3. **Ensure exactly ONE takopi process** before testing:
+
+   ```powershell
+   Get-Process -Name "takopi*" -ErrorAction SilentlyContinue | Stop-Process -Force
+   ```
+
+4. **Restart the bridge** and retry `/compact`. You should see an ack message ("compacting…" or "creating handoff summary…") within seconds.

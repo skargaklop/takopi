@@ -416,7 +416,6 @@ async def test_jsonl_run_impl_branches(monkeypatch: pytest.MonkeyPatch) -> None:
     assert any(isinstance(evt, CompletedEvent) for evt in events)
 
 
-
 def test_prompt_fingerprint_length() -> None:
     fp = runner_module._prompt_fingerprint("hello world")
     assert len(fp) == 12
@@ -424,13 +423,11 @@ def test_prompt_fingerprint_length() -> None:
 
 
 def test_prompt_fingerprint_deterministic() -> None:
-    assert (
-        runner_module._prompt_fingerprint("test")
-        == runner_module._prompt_fingerprint("test")
-    )
-    assert (
-        runner_module._prompt_fingerprint("a")
-        != runner_module._prompt_fingerprint("b")
+    assert runner_module._prompt_fingerprint(
+        "test"
+    ) == runner_module._prompt_fingerprint("test")
+    assert runner_module._prompt_fingerprint("a") != runner_module._prompt_fingerprint(
+        "b"
     )
 
 
@@ -478,9 +475,9 @@ async def test_iter_jsonl_startup_timeout_no_output() -> None:
             idle_timeout_s=0.1,
         )
     ]
-    assert any(
-        isinstance(evt, CompletedEvent) and not evt.ok for evt in events
-    ), f"expected failed completion, got {events}"
+    assert any(isinstance(evt, CompletedEvent) and not evt.ok for evt in events), (
+        f"expected failed completion, got {events}"
+    )
 
 
 @pytest.mark.anyio
@@ -514,9 +511,9 @@ async def test_iter_jsonl_normal_stream_ignores_timeouts() -> None:
     # Should process lines without timing out — events may be empty if
     # the dummy runner ignores unknown JSON, but it must not hang.
     # The key assertion: no timeout error event is emitted.
-    assert not any(
-        isinstance(evt, CompletedEvent) and not evt.ok for evt in events
-    ), f"unexpected timeout on normal stream: {events}"
+    assert not any(isinstance(evt, CompletedEvent) and not evt.ok for evt in events), (
+        f"unexpected timeout on normal stream: {events}"
+    )
 
 
 @pytest.mark.anyio
@@ -526,13 +523,9 @@ async def test_lock_released_after_cancel() -> None:
     token = ResumeToken(engine="dummy", value="ses_test")
 
     async def slow_run(prompt, resume):
-        yield StartedEvent(
-            engine="dummy", resume=resume, title="test", meta={}
-        )
+        yield StartedEvent(engine="dummy", resume=resume, title="test", meta={})
         await anyio.sleep(300)
-        yield CompletedEvent(
-            engine="dummy", resume=resume, ok=True, answer="ok"
-        )
+        yield CompletedEvent(engine="dummy", resume=resume, ok=True, answer="ok")
 
     runner.run_impl = slow_run  # type: ignore[assignment]
 
@@ -552,9 +545,7 @@ async def test_lock_released_after_cancel() -> None:
 
     async def quick_run(prompt, resume):
         started.set()
-        yield CompletedEvent(
-            engine="dummy", resume=resume, ok=True, answer="ok"
-        )
+        yield CompletedEvent(engine="dummy", resume=resume, ok=True, answer="ok")
 
     runner.run_impl = quick_run  # type: ignore[assignment]
     with anyio.fail_after(2):

@@ -346,9 +346,7 @@ def test_stdin_payload_returns_none() -> None:
 
 
 def test_build_args_with_print_logs() -> None:
-    runner = OpenCodeRunner(
-        opencode_cmd="opencode", print_logs=True, log_level="DEBUG"
-    )
+    runner = OpenCodeRunner(opencode_cmd="opencode", print_logs=True, log_level="DEBUG")
     args = runner.build_args("hello", None, state=OpenCodeStreamState())
     assert "--print-logs" in args
     assert "--log-level" in args

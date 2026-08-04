@@ -1684,16 +1684,22 @@ async def run_main_loop(
                 )
 
             async def run_compact_job(job: ThreadJob) -> None:
-                """Execute a compact job; surface errors to the user."""
+                """Execute a compact job; surface lifecycle feedback to the user."""
+                from ..compact import get_compact_support
+                from ..model import CompletedEvent
+
+                entry = cfg.runtime.resolve_runner(
+                    resume_token=job.resume_token,
+                    engine_override=job.resume_token.engine,
+                )
+                runner = entry.runner
+                instructions = job.compact_instructions
+                support = get_compact_support(runner)
+                final_event: CompletedEvent | None = None
                 try:
-                    entry = cfg.runtime.resolve_runner(
-                        resume_token=job.resume_token,
-                        engine_override=job.resume_token.engine,
-                    )
-                    runner = entry.runner
-                    instructions = job.compact_instructions
-                    async for _event in runner.compact(job.resume_token, instructions):
-                        pass
+                    async for event in runner.compact(job.resume_token, instructions):
+                        if isinstance(event, CompletedEvent):
+                            final_event = event
                 except (RuntimeError, OSError, ValueError) as exc:
                     logger.error("compact.job_failed", error=str(exc))
                     await send_plain(
@@ -1701,9 +1707,35 @@ async def run_main_loop(
                         chat_id=cast(int, job.chat_id),
                         user_msg_id=cast(int, job.user_msg_id),
                         text=f"compact failed: {exc}",
-                        notify=False,
+                        notify=True,
                         thread_id=cast(int | None, job.thread_id),
                     )
+                    return
+                if final_event is not None and not final_event.ok:
+                    error_text = final_event.error or "unknown error"
+                    logger.error("compact.job_failed", error=error_text)
+                    await send_plain(
+                        cfg.exec_cfg.transport,
+                        chat_id=cast(int, job.chat_id),
+                        user_msg_id=cast(int, job.user_msg_id),
+                        text=f"compact failed: {error_text}",
+                        notify=True,
+                        thread_id=cast(int | None, job.thread_id),
+                    )
+                    return
+                # Success — honest wording based on true_compaction.
+                if support.true_compaction:
+                    status = "compaction completed."
+                else:
+                    status = "handoff summary finished."
+                await send_plain(
+                    cfg.exec_cfg.transport,
+                    chat_id=cast(int, job.chat_id),
+                    user_msg_id=cast(int, job.user_msg_id),
+                    text=status,
+                    notify=True,
+                    thread_id=cast(int | None, job.thread_id),
+                )
 
             async def run_thread_job(job: ThreadJob) -> None:
                 if job.kind == "compact":

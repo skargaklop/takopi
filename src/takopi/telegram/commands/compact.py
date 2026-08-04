@@ -197,6 +197,20 @@ async def handle_compact_command(
     )
     await scheduler.enqueue(job)
 
+    # Ack on enqueue — honest wording based on true_compaction.
+    if support.true_compaction:
+        ack = f"compacting {resume_token.engine} session…"
+    else:
+        ack = f"creating handoff summary for {resume_token.engine} session…"
+    await send_plain(
+        cfg.exec_cfg.transport,
+        chat_id=chat_id,
+        user_msg_id=user_msg_id,
+        text=ack,
+        notify=False,
+        thread_id=msg.thread_id,
+    )
+
 
 def _supersede_pending(
     state: TelegramLoopState, chat_id: int, thread_id: int | None

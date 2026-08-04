@@ -1,5 +1,10 @@
 """Minimal ACP (Agent Client Protocol) JSON-RPC stdio client.
 
+**Test-only until Task 6 of the compact production-failure plan.**
+omp and grok now use ``HandoffCompactMixin`` (handoff summary via ``run()``)
+instead of this ACP path. ``FakeAcpTransport`` and ``AcpCompactMixin`` remain
+for future subprocess-transport work.
+
 Used only for ``/compact`` on ACP-capable runners (grok, omp). The client
 communicates over JSON-RPC 2.0, using stdio in production and an in-memory
 transport pair (:class:`FakeAcpTransport`) in tests.

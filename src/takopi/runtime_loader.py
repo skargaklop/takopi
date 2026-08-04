@@ -138,7 +138,6 @@ def build_router(
                 status = "load_error"
                 warnings.append(f"{engine_id}: {issue}")
 
-
         cmd = backend.cli_cmd or backend.id
         if not _cli_is_available(cmd, runner):
             status = "missing_cli"

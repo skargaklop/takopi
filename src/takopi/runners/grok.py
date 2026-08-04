@@ -16,7 +16,7 @@ from ..events import EventFactory
 from ..logging import get_logger
 from ..model import EngineId, ResumeToken, TakopiEvent
 from ..runner import JsonlSubprocessRunner, ResumeTokenMixin, Runner
-from ._acp import AcpCompactMixin
+from ._compact_mixin import HandoffCompactMixin
 from ..schemas import grok as grok_schema
 from .modes import effective_prompt, run_modes
 from .run_options import get_run_options
@@ -153,7 +153,7 @@ def translate_grok_event(
 
 
 @dataclass(slots=True)
-class GrokRunner(AcpCompactMixin, ResumeTokenMixin, JsonlSubprocessRunner):
+class GrokRunner(HandoffCompactMixin, ResumeTokenMixin, JsonlSubprocessRunner):
     engine: EngineId = ENGINE
     resume_re: re.Pattern[str] = _RESUME_RE
 

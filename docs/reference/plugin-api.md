@@ -39,6 +39,7 @@ dependencies = ["takopi>=0.14,<0.15"]
 | `COMPACT_NONE` | Sentinel `CompactSupport` for runners without compaction |
 | `CompactUnsupportedError` | Raised when a runner cannot compact |
 | `SlashCompactMixin` | Mixin: delegates compact to `run("/compact …")` |
+| `HandoffCompactMixin` | Mixin: delegates compact to `run(handoff_prompt(instructions))` |
 | `AcpCompactMixin` | Mixin: compacts via ACP `session/prompt` |
 | `handoff_prompt` | Builds a handoff-summary prompt (not real compaction) |
 
@@ -151,9 +152,8 @@ class MyRunner(SlashCompactMixin, ResumeTokenMixin, JsonlSubprocessRunner):
 
 - `compact_support()` returns a `CompactSupport` describing the mode.
 - `compact(resume, instructions)` yields `TakopiEvent` following the same started→completed invariant as `run()`.
-- Use `SlashCompactMixin` for runners that support `/compact` as a slash command (claude, pi, codex).
-- Use `AcpCompactMixin` for runners that compact via ACP `session/prompt` (grok, omp). Override `create_acp_client()`.
-- For handoff-only runners (agy), implement `compact_support()` and `compact()` manually using `handoff_prompt()`.
+- Use `AcpCompactMixin` for runners that compact via ACP `session/prompt`. **Test-only** — no subprocess transport is implemented; omp and grok currently use `HandoffCompactMixin`. When a transport is available, override `create_acp_client()`.
+- Use `HandoffCompactMixin` for handoff-only runners (agy, omp, grok). It delegates compact to `run(handoff_prompt(instructions))`.
 - `get_compact_support(runner)` safely returns `COMPACT_NONE` for runners without compaction.
 
 ---

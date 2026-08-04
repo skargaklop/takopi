@@ -20,7 +20,7 @@ from ..events import EventFactory
 from ..logging import get_logger, log_pipeline
 from ..model import CompletedEvent, EngineId, ResumeToken, TakopiEvent
 from ..runner import BaseRunner, ResumeTokenMixin, Runner
-from ..compact import CompactSupport, handoff_prompt
+from ._compact_mixin import HandoffCompactMixin
 from ..utils.paths import get_run_base_dir
 from ..utils.streams import iter_bytes_lines
 from ..utils.subprocess import manage_subprocess
@@ -80,7 +80,7 @@ def parse_conversation_id(text: str | None) -> str | None:
 
 
 @dataclass(slots=True)
-class AgyRunner(ResumeTokenMixin, BaseRunner):
+class AgyRunner(HandoffCompactMixin, ResumeTokenMixin, BaseRunner):
     engine: EngineId = ENGINE
     resume_re: re.Pattern[str] = field(default=_RESUME_RE, repr=False)
     agy_cmd: str = "agy"
@@ -91,6 +91,7 @@ class AgyRunner(ResumeTokenMixin, BaseRunner):
     extra_args: list[str] = field(default_factory=list)
     session_title: str = "agy"
     logger: Any = field(default=logger, repr=False)
+    compact_handoff_note: str = "Antigravity handoff summary only; not real compaction"
 
     def format_resume(self, token: ResumeToken) -> str:
         if token.engine != ENGINE:
@@ -99,23 +100,6 @@ class AgyRunner(ResumeTokenMixin, BaseRunner):
 
     def is_resume_line(self, line: str) -> bool:
         return bool(_RESUME_LINE_RE.match(line))
-
-    def compact_support(self) -> CompactSupport:
-        return CompactSupport(
-            mode="handoff_only",
-            accepts_instructions=True,
-            true_compaction=False,
-            note="Antigravity handoff summary only; not real compaction",
-        )
-
-    async def compact(
-        self,
-        resume: ResumeToken,
-        instructions: str | None = None,
-    ) -> AsyncIterator[TakopiEvent]:
-        prompt = handoff_prompt(instructions)
-        async for event in self.run(prompt, resume):
-            yield event
 
     def command(self) -> str:
         return self.agy_cmd

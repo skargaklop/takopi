@@ -74,6 +74,4 @@ async def test_manage_subprocess_kills_process_tree(tmp_path: Path) -> None:
     assert marker.exists(), "child did not start before cleanup"
     child_pid = int(marker.read_text())
     await anyio.sleep(0.3)
-    assert not _is_process_alive(child_pid), (
-        f"child {child_pid} survived cleanup"
-    )
+    assert not _is_process_alive(child_pid), f"child {child_pid} survived cleanup"

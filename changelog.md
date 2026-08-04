@@ -4,7 +4,7 @@
 
 ### features
 
-- runner compaction protocol: runners MAY implement `compact_support()` and `compact()` to participate in `/compact`. Five modes: `slash_prompt` (claude, pi, codex), `native_api` (opencode), `acp` (grok, omp), `handoff_only` (agy), `none`. Compact jobs serialize on the same `ThreadScheduler` as prompt jobs. See [specification §5.7](reference/specification.md#57-runner-compaction-protocol-may).
+- runner compaction protocol: runners MAY implement `compact_support()` and `compact()` to participate in `/compact`. Five modes: `slash_prompt` (claude, pi, codex), `native_api` (opencode), `handoff_only` (agy, omp, grok), `none`. Compact jobs serialize on the same `ThreadScheduler` as prompt jobs. See [specification §5.7](reference/specification.md#57-runner-compaction-protocol-may).
 - show a `plan` or `goal` mode badge in the Telegram message footer, preceding the `ctx:` line, so active plan/goal runs are visible at a glance.
 - global `[runners]` config section: `startup_timeout_s` (60s default), `idle_timeout_s` (900s default), `kill_tree_on_cancel` (true default). Applied to all runners uniformly, never duplicated per engine.
 - process-tree cleanup on cancellation: Windows now uses `taskkill /T /F` to kill the entire subprocess tree (POSIX already uses process groups via `os.killpg`). Fixes orphaned `opencode.exe` / MCP server processes surviving cancellation.
@@ -15,6 +15,10 @@
 - `/compact` dispatch robustness: works from any reply context (final message footer, active run) and in any order relative to engine selectors (`/codex /compact` = `/compact /codex`). Engine precedence: explicit selector > reply-footer token > chat/topic default.
 - `/compact` confirmation flow for engines without native compaction: inline keyboard with "send anyway" (plain-text handoff prompt) and "cancel" buttons, replacing the previous flat refusal.
 - `/compact` errors are now surfaced to the user (previously silently swallowed by the scheduler).
+- `/compact` acknowledges on enqueue: an immediate message ("compacting…" or "creating handoff summary…") confirms the job was queued, before the runner starts.
+- `/compact` lifecycle feedback: the terminal `CompletedEvent` is now consumed and reported — success says "compaction completed." (true compaction) or "handoff summary finished." (handoff-only); failure says "compact failed: <error>".
+- omp and grok compact now use `HandoffCompactMixin` (handoff-summary prompt via `run()`) instead of the test-only ACP path. ACP compact (`AcpCompactMixin`, `FakeAcpTransport`) remains in the codebase for future subprocess-transport work.
+- `HandoffCompactMixin` shared mixin in `_compact_mixin.py` — used by agy, omp, and grok; replaces inline `compact_support()`/`compact()` implementations.
 
 ### changes
 

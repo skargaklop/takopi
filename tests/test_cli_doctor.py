@@ -140,6 +140,7 @@ async def test_doctor_telegram_checks_chat_and_topics_error(monkeypatch) -> None
 
 def test_doctor_runner_processes_none(monkeypatch) -> None:
     import importlib
+
     doctor_mod = importlib.import_module("takopi.cli.doctor")
 
     monkeypatch.setattr(doctor_mod, "_list_runner_processes", lambda: [])
@@ -151,14 +152,19 @@ def test_doctor_runner_processes_none(monkeypatch) -> None:
 
 def test_doctor_runner_processes_found(monkeypatch) -> None:
     import importlib
+
     doctor_mod = importlib.import_module("takopi.cli.doctor")
 
     monkeypatch.setattr(
         doctor_mod,
         "_list_runner_processes",
         lambda: [
-            doctor_mod.ProcInfo(pid=1234, ppid=100, name="codex", cmdline="codex app-server"),
-            doctor_mod.ProcInfo(pid=5678, ppid=1234, name="node", cmdline="node mcp.js"),
+            doctor_mod.ProcInfo(
+                pid=1234, ppid=100, name="codex", cmdline="codex app-server"
+            ),
+            doctor_mod.ProcInfo(
+                pid=5678, ppid=1234, name="node", cmdline="node mcp.js"
+            ),
         ],
     )
     checks = doctor_mod._doctor_runner_processes()

@@ -108,8 +108,16 @@ async def _doctor_telegram_checks(
         await bot.close()
     return checks
 
+
 _RUNNER_PROCESS_NAMES: tuple[str, ...] = (
-    "codex", "claude", "opencode", "pi", "agy", "grok", "omp", "node",
+    "codex",
+    "claude",
+    "opencode",
+    "pi",
+    "agy",
+    "grok",
+    "omp",
+    "node",
 )
 
 
@@ -131,7 +139,9 @@ def _list_runner_processes() -> list[ProcInfo]:
         try:
             result = subprocess.run(
                 [
-                    "wmic", "process", "get",
+                    "wmic",
+                    "process",
+                    "get",
                     "ProcessId,ParentProcessId,Name,CommandLine",
                     "/format:csv",
                 ],
@@ -147,7 +157,9 @@ def _list_runner_processes() -> list[ProcInfo]:
     try:
         result = subprocess.run(
             ["ps", "axo", "pid,ppid,comm,args"],
-            capture_output=True, text=True, timeout=10,
+            capture_output=True,
+            text=True,
+            timeout=10,
         )
     except FileNotFoundError:
         return []
@@ -213,11 +225,13 @@ def _doctor_runner_processes() -> list[DoctorCheck]:
     for name, group in sorted(by_name.items()):
         pids = ", ".join(str(p.pid) for p in group)
         lines.append(f"  {name}: {len(group)} process(es), PIDs: [{pids}]")
-    return [DoctorCheck(
-        "runner processes", "warning",
-        f"{len(procs)} process(es) running\n" + "\n".join(lines),
-    )]
-
+    return [
+        DoctorCheck(
+            "runner processes",
+            "warning",
+            f"{len(procs)} process(es) running\n" + "\n".join(lines),
+        )
+    ]
 
 
 def run_doctor(

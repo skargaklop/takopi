@@ -19,7 +19,7 @@ from ..model import (
 from ..runner import Runner
 from .modes import effective_prompt, run_modes
 from .pi import PiRunner, PiStreamState, pi_schema
-from ._acp import AcpCompactMixin
+from ._compact_mixin import HandoffCompactMixin
 from .run_options import get_run_options
 
 ENGINE: EngineId = "omp"
@@ -67,7 +67,7 @@ def _unquote_token(token: str) -> str:
     return token
 
 
-class OmpRunner(AcpCompactMixin, PiRunner):
+class OmpRunner(HandoffCompactMixin, PiRunner):
     engine: EngineId = ENGINE
     session_title: str = "omp"
     resume_re: re.Pattern[str] = _RESUME_RE

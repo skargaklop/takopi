@@ -33,3 +33,51 @@
 - **`anyio.TaskGroup.start_soon` does not accept kwargs.** Positional args only. Use `functools.partial` for keyword arguments.
 - **`CompactSupport` dataclass requires `true_compaction: bool`** as a positional argument — not visible from the plan's text. Test doubles must include it.
 - **`send_plain` puts `reply_markup` in `RenderedMessage.extra`**, not in `SendOptions`. Tests must check `message.extra["reply_markup"]`, not `options.reply_markup`.
+
+## 2026-08-04: Compact production failure investigation (omp session)
+
+- Root causes verified, in user-impact order: (1) the uv-tools install at
+  %APPDATA%/uv/tools/takopi/Lib/site-packages/takopi was stale (2026-08-02)
+  despite a believed rebuild - file dates in site-packages are the source of
+  truth, not the install command exit code; (2) the ACP compact path is a
+  test-only stub (no production transport; omp/grok never override
+  create_acp_client; _resolve_transport raises); (3) AcpCompactMixin.compact()
+  converts failures into CompletedEvent(ok=False) events which run_compact_job
+  discards - total silence for success and failure; (4) /compact <instructions>
+  was routed as a plain prompt by the prompt batcher (fixed in 4669620).
+- The 4669620 implementation passed tests with injected FakeAcpTransport, which
+  masked the missing production transport. Tests with injected fakes must be
+  paired with one production-path assertion (no transport override) before a
+  feature is declared done.
+- Two python.exe takopi instances were observed with identical start times;
+  duplicate pollers split get_updates and cause intermittent "nothing happens"
+  reports. Verify a single instance after every (re)start.
+- Process evidence beat process claims: the bridge restarted after the commit
+  but still executed the old build because the installed artifact never
+  changed.
+## 2026-08-04: Compact production-failure gap closure
+
+- Swapping a base-class import on the same file line as another import
+  consumed the neighboring `get_run_options` import silently (omp.py). The
+  `CUT 23.=23` removed the entire line, not just the `AcpCompactMixin` symbol.
+  When cutting an import line that shares a file with other imports, always
+  re-read the file afterward and verify no neighboring imports were lost.
+- The edit-tool `PUT N.=N:` replaces the target line. When using it to change
+  a class declaration, the body line immediately below (e.g. `engine: EngineId`)
+  can be silently consumed if it was on the next line. Always re-read after a
+  `PUT N.=N:` to confirm the surrounding lines survived.
+- `HandoffCompactMixin` with a class-level `compact_handoff_note` field lets
+  each runner customize the note without duplicating `compact_support()` and
+  `compact()` in every class. Prefer one shared mixin over inline copies.
+- `run_compact_job` must consume the terminal `CompletedEvent` and report
+  honest status. Discarding events via `async for _event in runner.compact():
+  pass` is total failure silence — success and failure look identical to the
+  user. Always inspect the `CompletedEvent.ok` field and surface it.
+- Ack-on-enqueue is essential for perceived latency: without it, the user
+  sends `/compact` and waits seconds with no feedback before the runner
+  produces output. A one-line ack ("compacting…" / "creating handoff summary…")
+  closes the feedback gap.
+- Tests that inject `FakeAcpTransport` and assert `mode == "acp"` become
+  incorrect when the production path switches to handoff. When migrating a
+  runner's compact mode, update both the support-mode tests and the
+  delegation tests in the same commit.

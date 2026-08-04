@@ -8,6 +8,7 @@ The `/compact` slash command does not yet work in all message contexts:
 
 - Replying to a message from an existing session does not reliably route `/compact` to that session's engine.
 - The relative order of `/compact` and other slash commands (e.g., `/codex`, `/claude`, `/opencode`) in a single message is not consistently resolved.
+- Live report (2026-08-04): replying `/compact` (bare or with instructions) to an `omp` session yields no visible result. Verified compounding causes: (a) the ACP compact path is a test-only stub - no production ACP transport exists (`AcpClient._resolve_transport` raises `Subprocess ACP transport not yet implemented`; `omp`/`grok` never override `create_acp_client`); (b) `AcpCompactMixin.compact()` converts every failure into a `CompletedEvent(ok=False)` that `run_compact_job` discards (`async for ... : pass`), so failures and successes are both invisible; (c) `/compact <instructions>` was delivered to the agent as a plain-text prompt via the prompt batcher (fixed in `4669620`, pending deploy verification).
 
 ### Requirements
 
@@ -17,12 +18,18 @@ The `/compact` slash command does not yet work in all message contexts:
    - Notify the user that this agent does not support native compaction.
    - Ask the user whether to send the prompt as a plain text compaction request to the agent anyway (i.e., pass the raw compaction prompt through the normal `run()` path, letting the agent handle it as a regular prompt).
    - Only proceed after explicit user confirmation.
+4. No silent compact jobs: every `/compact` invocation must produce user-visible lifecycle feedback - an acknowledgement on acceptance, a completion notice (honest per mode: real compaction vs handoff summary), and a failure reply when `compact()` raises OR yields a non-ok `CompletedEvent`. Discarding runner events in `run_compact_job` is forbidden.
+5. `omp` and `grok` must not declare `mode="acp"` / `true_compaction=True` until a production ACP transport exists and harness-side interception of `/compact` is proven (Task 6). Reclassify them as `handoff_only` (delegate `compact()` to `run(handoff_prompt(instructions))`, same as `agy`) so `/compact` works honestly through the normal session path.
+6. Deployment verification is part of done: after any rebuild, verify the installed artifact (grep the uv-tools `site-packages` for the new symbols, check file dates) and verify exactly one takopi instance is running. Live evidence 2026-08-04: the bridge kept executing a 2026-08-02 build while believed rebuilt.
 
 ### Scope
 
 - `src/takopi/telegram/loop.py` — command dispatch and reply-context resolution
 - `src/takopi/scheduler.py` — `ThreadJob.kind` field and compact job routing (partially done in prior session)
 - `src/takopi/runners/` — `compact_support()` return values per runner
+- `src/takopi/runners/_acp.py`, `omp.py`, `grok.py` - reclassify compact support to `handoff_only` until Task 6 lands
+- `docs/plans/2026-08-04-compact-production-failure-gap-closure.md` - gap-closure plan
+- `tests/test_telegram_compact_dispatch.py` - loop-level coverage incl. lifecycle feedback
 
 ---
 
@@ -137,6 +144,74 @@ For each new agent, follow this workflow:
 - `docs/reference/config.md` — config table documentation
 - `tests/test_<engine>_runner.py` — runner tests
 
+---
+
+## Task 5: Clean Shutdown Without Asyncio Pipe-Transport Noise (Windows)
+
+### Problem
+
+On Ctrl+C, after `shutdown.interrupted [takopi.cli.run]`, the interpreter emits repeated deallocator tracebacks (live log 2026-08-04, CPython 3.14, Windows ProactorEventLoop):
+
+```text
+Exception ignored while calling deallocator <function _ProactorBasePipeTransport.__del__ ...>
+...
+ValueError: I/O operation on closed pipe
+Exception ignored while calling deallocator <function BaseSubprocessTransport.__del__ ...>
+```
+
+Root-cause hypothesis: runner subprocesses are killed (`taskkill /T /F` in `manage_subprocess`) and reaped via `proc.wait()`, but the asyncio pipe transports (stdin/stdout/stderr) are never explicitly closed. At interpreter teardown the transports are garbage-collected unclosed; `__del__` issues a `ResourceWarning` whose `__repr__` touches `fileno()` on an already-closed pipe, producing the `ValueError` noise. Prior related work: `c4e1817` (graceful shutdown), `42ccb1a` (process-tree cleanup), `plan-process-tree-cleanup.md`; this task is the remaining transport-close gap.
+
+### Requirements
+
+1. On SIGINT/SIGTERM, normal exit, and `/cancel`, every runner subprocess transport is explicitly closed and awaited before the event loop stops: zero `Exception ignored` deallocator tracebacks and zero `unclosed transport` ResourceWarnings on Windows + CPython 3.14.
+2. Cover every spawn site: `manage_subprocess()` (`src/takopi/utils/subprocess.py`), the codex app-server client, ACP runners, and any direct `anyio.open_process()` callers.
+3. Shutdown stays bounded: transport closing must not hang on wedged pipes (timeout configurable via settings - no hardcoded values).
+4. Regression coverage: an integration test that starts a run with a live subprocess, interrupts with SIGINT, and asserts stderr contains no `Exception ignored` / `unclosed transport` (Windows-marked); unit tests for the close helper.
+5. Preserve the constraints recorded in `EXPERIENCE.md`: no stored `CancelScope` objects in `PromptInputBatcher`; no outer `CancelScope` around `run_main_loop`.
+
+### Investigation Steps
+
+1. Read-only subagent: trace every subprocess lifecycle - spawn sites, transport ownership, shutdown ordering in `src/takopi/cli/run.py` (~line 329) through `anyio.run` teardown; confirm whether `Process.aclose()` or stdio stream `aclose()` is ever called on each path. Do NOT modify any files.
+2. Verify CPython 3.14 proactor behavior vs 3.13 and the anyio version in `uv.lock` (does `Process.wait()` close transports?).
+3. Save findings in `docs/reference/shutdown/pipe-transport-cleanup.md`.
+4. Write an implementation plan (`.md` in `docs/plans/`).
+5. Execute via subagent (TDD); verify by reproducing the Ctrl+C scenario end-to-end on Windows.
+
+### Scope
+
+- `src/takopi/utils/subprocess.py` - transport close in `manage_subprocess()` / new helper
+- `src/takopi/runner.py`, `src/takopi/runner_bridge.py`, `src/takopi/runners/_acp.py`, codex app-server client - per-spawn-site cleanup
+- `src/takopi/cli/run.py` - shutdown ordering
+- `src/takopi/settings.py` - shutdown timeout config key
+- `tests/test_shutdown.py` - regression coverage
+- `docs/reference/shutdown/` - saved findings
+---
+
+## Task 6: Real Compaction for ACP Runners (grok, omp)
+
+### Problem
+
+The `acp` compact mode introduced in `f23baba` is a test-only stub: the only transport in the tree is `FakeAcpTransport`, production runners never override `create_acp_client`, and `AcpClient._resolve_transport` raises `Subprocess ACP transport not yet implemented`. Tests pass because they inject the fake transport. Production evidence (2026-08-04, omp session) also shows `/compact` delivered via `session/prompt` reaches the model as a plain user turn, so harness-side interception is unproven even once a transport exists.
+
+### Requirements
+
+1. Research each harness (grok, omp): ACP `available_commands` advertisement, whether slash commands sent via `session/prompt` are intercepted server-side, and the stdio JSON-RPC transport contract. Save findings under `docs/reference/runners/<engine>/`.
+2. Implement a production subprocess ACP transport (stdin/stdout JSON-RPC) with the same message ordering the tests assume via `FakeAcpTransport`.
+3. Only restore `mode="acp"` / `true_compaction=True` per engine when real compaction is verified end-to-end against the live harness; otherwise keep `handoff_only`.
+4. Add an integration smoke test that runs the real CLI (marked, skippable in CI) proving `/compact` is not delivered to the model as plain text.
+
+### Investigation Steps
+
+1. Read-only subagent: study harness docs/source for ACP transport + `available_commands` semantics; save to `docs/reference/runners/`.
+2. Write an implementation plan (`.md` in `docs/plans/`).
+3. Execute via subagent with TDD.
+
+### Scope
+
+- `src/takopi/runners/_acp.py` - real transport + client hardening
+- `src/takopi/runners/omp.py`, `grok.py` - `create_acp_client` overrides, support re-declaration
+- `tests/test_acp_client.py`, `tests/test_acp_compact_runners.py`
+- `docs/reference/runners/omp/`, `docs/reference/runners/grok/`
 ---
 
 ## Workflow Convention

@@ -35,3 +35,32 @@ class SlashCompactMixin:
             instructions = None
         async for event in self.run(compact_prompt(instructions), resume):
             yield event
+
+
+class HandoffCompactMixin:
+    """Delegate compaction to ``run(handoff_prompt(instructions), resume)``.
+
+    Used by runners without native compact (agy, omp, grok). Produces a
+    handoff summary, not real context reduction.
+    """
+
+    compact_accepts_instructions: bool = True
+    compact_handoff_note: str = "Handoff summary only; not real compaction"
+
+    def compact_support(self) -> CompactSupport:
+        return CompactSupport(
+            mode="handoff_only",
+            accepts_instructions=self.compact_accepts_instructions,
+            true_compaction=False,
+            note=self.compact_handoff_note,
+        )
+
+    async def compact(
+        self,
+        resume: ResumeToken,
+        instructions: str | None = None,
+    ) -> AsyncIterator[TakopiEvent]:
+        from ..compact import handoff_prompt
+
+        async for event in self.run(handoff_prompt(instructions), resume):
+            yield event

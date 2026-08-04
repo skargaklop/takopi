@@ -446,7 +446,6 @@ def test_codex_build_runner_configs(tmp_path: Path) -> None:
         build_runner({"profile": 123}, tmp_path)
 
 
-
 def _is_process_alive(pid: int) -> bool:
     """Check if a process is alive, cross-platform."""
     if os.name == "nt":
