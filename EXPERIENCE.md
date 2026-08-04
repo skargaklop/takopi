@@ -24,3 +24,12 @@
 - Cancellation remains sensitive: do not restore stored `CancelScope` objects
   in `PromptInputBatcher` and do not add an outer `CancelScope` around
   `run_main_loop`.
+
+## 2026-08-04: Compact dispatch robustness implementation
+
+- **Edit tool `PUT N.=N:` replaces the target line.** When inserting a new import in a multi-line `from X import (...)` block, `PUT 54.=54:` with body `+    handle_compact,` **replaces** line 54 instead of inserting before it. This silently consumed `handle_ctx_command`, `parse_slash_command`, `should_handle_as_meta_command`, `STEER_CALLBACK_DATA`, and `COMPACT_DECLINE_CALLBACK_DATA` across multiple edits. Each was caught by ruff/tests, but the pattern is error-prone. Mitigation: re-read the block after each insertion, or use `PUT >N:` (insert after) when the target line must survive.
+- **`PUT N.=N:` on a frozenset element also replaces.** Adding `"compact"` to `CONTROL_COMMANDS` via `PUT 31.=31:` replaced `"file"` instead of appending. Caused a pre-existing test failure. Same root cause as above.
+- **`TelegramLoopState` with `slots=True` + `dataclass`**: adding a field requires both the class definition AND the constructor call to be updated. Missing `seen_messages_order` in either location causes `AttributeError`.
+- **`anyio.TaskGroup.start_soon` does not accept kwargs.** Positional args only. Use `functools.partial` for keyword arguments.
+- **`CompactSupport` dataclass requires `true_compaction: bool`** as a positional argument — not visible from the plan's text. Test doubles must include it.
+- **`send_plain` puts `reply_markup` in `RenderedMessage.extra`**, not in `SendOptions`. Tests must check `message.extra["reply_markup"]`, not `options.reply_markup`.

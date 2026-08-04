@@ -15,7 +15,6 @@ from ..config_watch import ConfigReload, watch_config as watch_config_changes
 from ..commands import list_command_ids
 from ..directives import DirectiveError
 from ..logging import get_logger
-from ..compact import get_compact_support, warn_if_dropping_instructions
 from ..model import EngineId, ResumeToken
 from ..runners.run_options import (
     EngineRunOptions,
@@ -35,6 +34,8 @@ from ..context import RunContext
 from ..ids import RESERVED_CHAT_COMMANDS
 from .bridge import (
     CANCEL_CALLBACK_DATA,
+    COMPACT_CONFIRM_CALLBACK_DATA,
+    COMPACT_DECLINE_CALLBACK_DATA,
     STEER_CALLBACK_DATA,
     TelegramBridgeConfig,
     send_plain,
@@ -50,6 +51,8 @@ from .commands.handlers import (
     handle_agent_command,
     handle_chat_ctx_command,
     handle_chat_new_command,
+    handle_compact,
+    handle_compact_confirm,
     handle_ctx_command,
     handle_file_command,
     handle_file_put_default,
@@ -64,6 +67,7 @@ from .commands.handlers import (
     handle_trigger_command,
     parse_callback_data,
     parse_slash_command,
+    PendingCompactConfirm,
     get_reserved_commands,
     run_engine,
     save_file_put,
@@ -71,7 +75,7 @@ from .commands.handlers import (
     should_show_resume_line,
 )
 from .commands.meta_args import should_handle_as_meta_command
-from .commands.parse import is_cancel_command
+from .commands.parse import is_cancel_command, parse_compact_invocation
 from .commands.reply import make_reply
 from .context import _merge_topic_context, _usage_ctx_set, _usage_topic
 from .topics import (
@@ -241,86 +245,6 @@ async def _send_startup(cfg: TelegramBridgeConfig) -> None:
     )
     if sent is not None:
         logger.info("startup.sent", chat_id=cfg.chat_id)
-
-
-async def _handle_compact_command(
-    instructions: str | None,
-    *,
-    cfg: TelegramBridgeConfig,
-    msg: TelegramIncomingMessage,
-    reply: Callable[..., Awaitable[None]],
-    scheduler: ThreadScheduler,
-    resume_resolver: ResumeResolver,
-    topic_store: TopicStateStore | None,
-    chat_session_store: ChatSessionStore | None,
-    topic_key: tuple[int, int] | None,
-    chat_session_key: tuple[int, int | None] | None,
-    reply_id: int | None,
-    running_tasks: Mapping[MessageRef, object],
-) -> None:
-    """Resolve an existing session and enqueue a compact job on the scheduler."""
-    chat_id = msg.chat_id
-    user_msg_id = msg.message_id
-    engine = cfg.runtime.resolve_engine(engine_override=None, context=None)
-
-    resume_decision = await resume_resolver.resolve(
-        resume_token=None,
-        reply_id=reply_id,
-        chat_id=chat_id,
-        user_msg_id=user_msg_id,
-        thread_id=msg.thread_id,
-        chat_session_key=chat_session_key,
-        topic_key=topic_key,
-        engine_for_session=engine,
-        prompt_text="",
-        user_resume=None,
-        bare_resume_id=None,
-        reply_resume=None,
-    )
-    resume_token = resume_decision.resume_token
-    if resume_token is None:
-        await reply(
-            text=(
-                "no active session to compact.\n"
-                "reply to a Takopi progress/final message, "
-                "or send a normal prompt first."
-            )
-        )
-        return
-
-    resolved = cfg.runtime.resolve_runner(
-        resume_token=resume_token,
-        engine_override=resume_token.engine,
-    )
-    runner = resolved.runner
-    support = get_compact_support(runner)
-
-    if support.mode == "none":
-        await reply(text=f"{resume_token.engine} does not support compact.")
-        return
-
-    final_instructions = instructions
-    if final_instructions and not support.accepts_instructions:
-        warning = warn_if_dropping_instructions(resume_token.engine, final_instructions)
-        if warning:
-            await reply(text=warning)
-        final_instructions = None
-
-    job = ThreadJob(
-        chat_id=chat_id,
-        user_msg_id=user_msg_id,
-        text="[compact]",
-        resume_token=resume_token,
-        context=None,
-        thread_id=msg.thread_id,
-        session_key=chat_session_key,
-        progress_ref=None,
-        plan=False,
-        goal=None,
-        kind="compact",
-        compact_instructions=final_instructions,
-    )
-    await scheduler.enqueue(job)
 
 
 def _dispatch_builtin_command(
@@ -523,16 +447,6 @@ def _dispatch_builtin_command(
         )
         task_group.start_soon(handler)
         return True
-    if command_id == "compact":
-        if ctx.compact_callback is not None:
-            instructions = args_text.strip() or None
-            task_group.start_soon(ctx.compact_callback, instructions)
-        else:
-            task_group.start_soon(
-                partial(reply, text="compact is unavailable for this transport.")
-            )
-        return True
-
     return False
 
 
@@ -649,7 +563,6 @@ class TelegramCommandContext:
     task_group: TaskGroup
     scheduler: ThreadScheduler | None = None
     running_tasks: Mapping[MessageRef, object] | None = None
-    compact_callback: Callable[[str | None], Awaitable[None]] | None = None
 
 
 def _classify_message(
@@ -704,6 +617,7 @@ class TelegramLoopState:
     seen_update_order: deque[int]
     seen_message_keys: set[MessageKey]
     seen_messages_order: deque[MessageKey]
+    pending_compact_confirms: dict[tuple[int, int], PendingCompactConfirm]
 
 
 if TYPE_CHECKING:
@@ -1170,6 +1084,7 @@ class ResumeResolver:
         user_resume: ResumeToken | None = None,
         bare_resume_id: str | None = None,
         reply_resume: ResumeToken | None = None,
+        for_compact: bool = False,
     ) -> ResumeDecision:
         # Priority 1: explicit resume in the user-sent message (always wins).
         if user_resume is not None:
@@ -1201,6 +1116,14 @@ class ResumeResolver:
                 MessageRef(channel_id=chat_id, message_id=reply_id)
             )
             if running_task is not None:
+                if for_compact:
+                    # For compact: await the running task's resume token,
+                    # then return it so the compact job serializes behind
+                    # the active run via the scheduler's _busy_until.
+                    token = await _wait_for_resume(running_task)
+                    return ResumeDecision(
+                        resume_token=token, handled_by_running_task=False
+                    )
                 self._task_group.start_soon(
                     send_with_resume,
                     self._cfg,
@@ -1526,6 +1449,7 @@ async def run_main_loop(
         seen_update_order=deque(),
         seen_message_keys=set(),
         seen_messages_order=deque(),
+        pending_compact_confirms={},
     )
 
     def refresh_topics_scope() -> None:
@@ -1760,15 +1684,26 @@ async def run_main_loop(
                 )
 
             async def run_compact_job(job: ThreadJob) -> None:
-                """Execute a compact job: resolve runner, call compact(), handle events."""
-                entry = cfg.runtime.resolve_runner(
-                    resume_token=job.resume_token,
-                    engine_override=job.resume_token.engine,
-                )
-                runner = entry.runner
-                instructions = job.compact_instructions
-                async for _event in runner.compact(job.resume_token, instructions):
-                    pass  # events handled by the progress/render layer in a full impl
+                """Execute a compact job; surface errors to the user."""
+                try:
+                    entry = cfg.runtime.resolve_runner(
+                        resume_token=job.resume_token,
+                        engine_override=job.resume_token.engine,
+                    )
+                    runner = entry.runner
+                    instructions = job.compact_instructions
+                    async for _event in runner.compact(job.resume_token, instructions):
+                        pass
+                except (RuntimeError, OSError, ValueError) as exc:
+                    logger.error("compact.job_failed", error=str(exc))
+                    await send_plain(
+                        cfg.exec_cfg.transport,
+                        chat_id=cast(int, job.chat_id),
+                        user_msg_id=cast(int, job.user_msg_id),
+                        text=f"compact failed: {exc}",
+                        notify=False,
+                        thread_id=cast(int | None, job.thread_id),
+                    )
 
             async def run_thread_job(job: ThreadJob) -> None:
                 if job.kind == "compact":
@@ -2348,6 +2283,39 @@ async def run_main_loop(
                     )
                     return
 
+                compact_invocation = parse_compact_invocation(
+                    text, engine_ids=cfg.runtime.engine_ids
+                )
+                if compact_invocation is not None:
+                    prompt_batcher.cancel(
+                        prompt_batcher.key_for_message(
+                            msg,
+                            topic_key=topic_key,
+                            chat_session_key=chat_session_key,
+                        )
+                    )
+                    tg.start_soon(
+                        partial(
+                            handle_compact,
+                            compact_invocation.instructions,
+                            compact_invocation.engine,
+                            cfg=cfg,
+                            msg=msg,
+                            reply=reply,
+                            scheduler=scheduler,
+                            resume_resolver=resume_resolver,
+                            topic_store=state.topic_store,
+                            chat_session_store=state.chat_session_store,
+                            topic_key=topic_key,
+                            chat_session_key=chat_session_key,
+                            reply_id=reply_id,
+                            running_tasks=state.running_tasks,
+                            state=state,
+                            ambient_context=ambient_context,
+                        )
+                    )
+                    return
+
                 command_id = classification.command_id
                 args_text = classification.args_text
                 if command_id == "new":
@@ -2420,20 +2388,6 @@ async def run_main_loop(
                         task_group=tg,
                         scheduler=scheduler,
                         running_tasks=state.running_tasks,
-                        compact_callback=partial(
-                            _handle_compact_command,
-                            cfg=cfg,
-                            msg=msg,
-                            reply=reply,
-                            scheduler=scheduler,
-                            resume_resolver=resume_resolver,
-                            topic_store=state.topic_store,
-                            chat_session_store=state.chat_session_store,
-                            topic_key=topic_key,
-                            chat_session_key=chat_session_key,
-                            reply_id=reply_id,
-                            running_tasks=state.running_tasks,
-                        ),
                     ),
                     command_id=command_id,
                 ):
@@ -2624,6 +2578,24 @@ async def run_main_loop(
                             update,
                             state.running_tasks,
                             scheduler,
+                        )
+                    elif update.data == COMPACT_CONFIRM_CALLBACK_DATA:
+                        tg.start_soon(
+                            handle_compact_confirm,
+                            cfg,
+                            update,
+                            state,
+                            scheduler,
+                            confirmed=True,
+                        )
+                    elif update.data == COMPACT_DECLINE_CALLBACK_DATA:
+                        tg.start_soon(
+                            handle_compact_confirm,
+                            cfg,
+                            update,
+                            state,
+                            scheduler,
+                            confirmed=False,
                         )
                     elif update.data:
                         command_id, args_text = parse_callback_data(update.data)

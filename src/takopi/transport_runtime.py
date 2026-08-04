@@ -434,6 +434,10 @@ class TransportRuntime:
     def is_resume_line(self, line: str) -> bool:
         return self._router.is_resume_line(line)
 
+    def extract_resume(self, text: str | None) -> ResumeToken | None:
+        """Extract a resume token from message text (e.g. reply footer)."""
+        return self._router.extract_resume(text)
+
     def resolve_run_cwd(self, context: RunContext | None) -> Path | None:
         try:
             return resolve_run_cwd(context, projects=self._projects)

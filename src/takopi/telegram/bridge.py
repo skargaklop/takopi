@@ -53,6 +53,16 @@ STEER_CANCEL_MARKUP = {
     ]
 }
 CLEAR_MARKUP = {"inline_keyboard": []}
+COMPACT_CONFIRM_CALLBACK_DATA = "takopi:compact:confirm"
+COMPACT_DECLINE_CALLBACK_DATA = "takopi:compact:decline"
+COMPACT_CONFIRM_MARKUP = {
+    "inline_keyboard": [
+        [
+            {"text": "send anyway", "callback_data": COMPACT_CONFIRM_CALLBACK_DATA},
+            {"text": "cancel", "callback_data": COMPACT_DECLINE_CALLBACK_DATA},
+        ]
+    ]
+}
 MIN_FOLLOWUP_DELAY_S = 0.1
 
 
@@ -337,12 +347,16 @@ async def send_plain(
     text: str,
     notify: bool = True,
     thread_id: int | None = None,
-) -> None:
+    reply_markup: dict | None = None,
+) -> MessageRef | None:
     reply_to = MessageRef(channel_id=chat_id, message_id=user_msg_id)
     rendered_text, entities = prepare_telegram(MarkdownParts(header=text))
-    await transport.send(
+    extra: dict = {"entities": entities}
+    if reply_markup is not None:
+        extra["reply_markup"] = reply_markup
+    return await transport.send(
         channel_id=chat_id,
-        message=RenderedMessage(text=rendered_text, extra={"entities": entities}),
+        message=RenderedMessage(text=rendered_text, extra=extra),
         options=SendOptions(reply_to=reply_to, notify=notify, thread_id=thread_id),
     )
 

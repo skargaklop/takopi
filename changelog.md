@@ -12,6 +12,9 @@
 - `CREATE_NEW_PROCESS_GROUP` flag on Windows subprocess creation, mirroring POSIX `start_new_session=True`.
 - `[opencode] print_logs` and `[opencode] log_level` config keys to pass `--print-logs` and `--log-level` to the OpenCode CLI.
 - `takopi doctor` now reports runner processes (codex, claude, opencode, etc.) and flags potential orphaned processes.
+- `/compact` dispatch robustness: works from any reply context (final message footer, active run) and in any order relative to engine selectors (`/codex /compact` = `/compact /codex`). Engine precedence: explicit selector > reply-footer token > chat/topic default.
+- `/compact` confirmation flow for engines without native compaction: inline keyboard with "send anyway" (plain-text handoff prompt) and "cancel" buttons, replacing the previous flat refusal.
+- `/compact` errors are now surfaced to the user (previously silently swallowed by the scheduler).
 
 ### changes
 

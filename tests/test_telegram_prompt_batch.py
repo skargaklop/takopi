@@ -61,6 +61,7 @@ def test_control_commands_do_not_batch() -> None:
         "/trigger mentions",
         "/queue",
         "/file put a.txt",
+        "/compact",
         "/topic proj",
     ):
         assert should_batch_text(text, settings=settings) is False

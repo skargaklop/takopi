@@ -21,7 +21,12 @@ Takopi resolves the active session from:
 1. The chat/topic's stored session (if any)
 2. A reply to a Takopi progress or final message
 
-If no session is found, Takopi replies with guidance.
+### Reply context and ordering
+
+- **Reply to any message**: `/compact` works when replying to a final message with a resume footer (e.g. `` `claude resume xyz` ``). The engine is resolved from the footer token.
+- **Reply to an active run**: `/compact` waits for the active run to finish, then compacts the same session.
+- **Any ordering with engine selectors**: both `/codex /compact` and `/compact /codex` resolve identically — the compact job targets the codex session.
+- **Engine precedence**: explicit selector > reply-footer engine > chat/topic default.
 
 ## What happens
 
@@ -63,7 +68,14 @@ Antigravity has no verified true compact command. Instead, Takopi sends a handof
 
 If you pass instructions to an engine that doesn't accept them (e.g., `/compact keep tests` on codex), Takopi warns you and runs compact without the instructions.
 
-## Plugin runners
+## Engines without compaction support
+
+When the target engine does not support compaction (`mode == "none"`), Takopi shows a confirmation message with inline buttons:
+
+- **Send anyway**: sends a plain-text compaction request as a regular prompt (using the `handoff_prompt` builder). This is **not real context reduction** — the agent receives a summary request as a normal message.
+- **Cancel**: dismisses the request.
+
+The confirmation ensures you know that the agent will not perform native compaction.
 
 Third-party runners can implement compaction by providing `compact_support()` and `compact()` methods. See the [plugin API reference](../reference/plugin-api.md#compaction) for details.
 

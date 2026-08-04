@@ -29,6 +29,7 @@ CONTROL_COMMANDS = frozenset(
         "trigger",
         "queue",
         "file",
+        "compact",
         "topic",
     }
 )

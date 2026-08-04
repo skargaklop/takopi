@@ -28,6 +28,10 @@ from .topics import _handle_ctx_command as handle_ctx_command
 from .topics import _handle_new_command as handle_new_command
 from .topics import _handle_topic_command as handle_topic_command
 from .trigger import _handle_trigger_command as handle_trigger_command
+from .compact import handle_compact_command as handle_compact
+from .compact import handle_compact_confirm_callback as handle_compact_confirm
+from .compact import PendingCompactConfirm
+from .parse import parse_compact_invocation as parse_compact
 
 __all__ = [
     "dispatch_command",
@@ -56,5 +60,8 @@ __all__ = [
     "run_engine",
     "save_file_put",
     "set_command_menu",
-    "should_show_resume_line",
+    "handle_compact",
+    "handle_compact_confirm",
+    "PendingCompactConfirm",
+    "parse_compact",
 ]
