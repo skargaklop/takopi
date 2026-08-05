@@ -1807,12 +1807,14 @@ async def run_main_loop(
                     return
 
                 # --- Phase 2: seed a NEW session with the summary ---
+                # Destination engine: explicit cross-engine target, or same engine.
+                target_engine = job.handoff_target or job.resume_token.engine
                 seed_prompt = handoff_seed_prompt(summary)
                 await send_plain(
                     cfg.exec_cfg.transport,
                     chat_id=chat_id,
                     user_msg_id=user_msg_id,
-                    text=f"creating handoff summary for {job.resume_token.engine} session…",
+                    text=f"creating handoff summary for {target_engine} session…",
                     notify=False,
                     thread_id=thread_id,
                 )
@@ -1827,7 +1829,7 @@ async def run_main_loop(
                         job.session_key,
                         None,
                         scheduler.note_thread_known,
-                        job.resume_token.engine,  # engine_override -> same engine
+                        target_engine,  # engine_override -> destination (or same)
                         None,
                         (),
                         False,
@@ -1847,7 +1849,7 @@ async def run_main_loop(
 
                 # --- Completion message + truncated summary echo (D2) ---
                 completion = (
-                    f"handoff complete — new {job.resume_token.engine} session "
+                    f"handoff complete — new {target_engine} session "
                     f"started with the summary.\n"
                     "Send your next message to continue. "
                     "Do not reply to pre-handoff messages; "
@@ -2491,6 +2493,7 @@ async def run_main_loop(
                             running_tasks=state.running_tasks,
                             state=state,
                             ambient_context=ambient_context,
+                            destination_engine=compact_invocation.destination_engine,
                         )
                     )
                     return
@@ -2524,6 +2527,7 @@ async def run_main_loop(
                             state=state,
                             ambient_context=ambient_context,
                             force_handoff=True,
+                            destination_engine=handoff_invocation.destination_engine,
                         )
                     )
                     return

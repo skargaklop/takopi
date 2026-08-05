@@ -259,7 +259,7 @@ The handoff-as-new-session flow (Task 1, plan `docs/plans/2026-08-04-compact-han
 - `docs/how-to/compact-session.md`, `docs/reference/commands-and-directives.md`, `changelog.md`
 ---
 
-## Task 8: Cross-Engine Handoff (Destination Engine Selection)
+## Task 8: Cross-Engine Handoff (Destination Engine Selection) (DONE)
 
 ### Problem
 

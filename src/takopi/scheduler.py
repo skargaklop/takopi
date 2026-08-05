@@ -9,7 +9,7 @@ import anyio
 
 from .context import RunContext
 from .logging import get_logger
-from .model import ResumeToken
+from .model import EngineId, ResumeToken
 from .transport import ChannelId, MessageId, MessageRef, ThreadId
 
 logger = get_logger(__name__)
@@ -29,6 +29,7 @@ class ThreadJob:
     goal: str | None = None
     kind: Literal["prompt", "compact", "handoff"] = "prompt"
     compact_instructions: str | None = None
+    handoff_target: EngineId | None = None
 
 
 RunJob = Callable[[ThreadJob], Awaitable[None]]

@@ -195,8 +195,11 @@ def _make_multi_cfg(
     *,
     default_engine: str | None = None,
     prompt_batch_debounce_s: float = 0.0,
+    unavailable_entries: list[RunnerEntry] | None = None,
 ) -> TelegramBridgeConfig:
     entries = [RunnerEntry(engine=r.engine, runner=r) for r in runners]
+    if unavailable_entries:
+        entries.extend(unavailable_entries)
     router = AutoRouter(
         entries=entries,
         default_engine=default_engine or entries[0].engine,
@@ -905,3 +908,232 @@ async def test_compact_on_true_compaction_engine_stays_immediate_regression() ->
     assert not any(
         "approve handoff" in str(s["message"].extra) for s in transport.send_calls
     )
+
+
+# ---------------------------------------------------------------------------
+# Cross-engine handoff: ``to <engine>`` destination selection (Task 8).
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio
+async def test_cross_engine_handoff_approval_names_both_engines() -> None:
+    """Test 8: /handoff to grok on an omp session -> approval card names both engines."""
+    transport = FakeTransport()
+    omp = HandoffScriptRunner([Return(answer="summary")], engine="omp")
+    grok = HandoffScriptRunner([Return(answer="ok")], engine="grok")
+    cfg = _make_multi_cfg(transport, [omp, grok])
+
+    async def poller(_cfg):
+        yield _msg(
+            "/handoff to grok",
+            message_id=10,
+            reply_to_message_id=5,
+            reply_to_text="done\n`omp resume s1`",
+        )
+
+    await run_main_loop(cfg, poller)
+    # Nothing ran yet (approval gate).
+    assert omp.calls == []
+    assert grok.calls == []
+    # Approval card names both engines.
+    texts = [s["message"].text.lower() for s in transport.send_calls]
+    assert any("from omp" in t and "grok" in t for t in texts), texts
+    assert any(
+        "approve handoff" in str(s["message"].extra) for s in transport.send_calls
+    )
+
+
+@pytest.mark.anyio
+async def test_cross_engine_handoff_approve_phases() -> None:
+    """Test 9: approve -> phase 1 on omp, phase 2 run() on grok with resume=None."""
+    transport = FakeTransport()
+    omp = HandoffScriptRunner([Return(answer="the summary")], engine="omp")
+    grok = HandoffScriptRunner([Return(answer="ok")], engine="grok")
+    cfg = _make_multi_cfg(transport, [omp, grok])
+
+    async def poller(_cfg):
+        yield _msg(
+            "/handoff to grok",
+            message_id=10,
+            reply_to_message_id=5,
+            reply_to_text="done\n`omp resume s1`",
+        )
+        yield _cb(callback_data="takopi:compact:confirm", message_id=1)
+
+    await run_main_loop(cfg, poller)
+    # Phase 1: omp produced the summary (via compact -> run).
+    assert len(omp.calls) >= 1
+    # Phase 2: grok.run() called with resume=None, seed prompt contains summary.
+    assert len(grok.calls) >= 1
+    phase2_prompt, phase2_resume = grok.calls[0]
+    assert phase2_resume is None
+    assert "the summary" in phase2_prompt
+    assert "handoff summary" in phase2_prompt.lower()
+    # Completion message names grok.
+    texts = [s["message"].text.lower() for s in transport.send_calls]
+    assert any("new grok session" in t for t in texts), texts
+
+
+@pytest.mark.anyio
+async def test_cross_engine_handoff_no_to_keeps_source_regression() -> None:
+    """Test 10: /handoff (no to) -> phase 2 keeps source engine."""
+    transport = FakeTransport()
+    omp = HandoffScriptRunner([Return(answer="summary")], engine="omp")
+    grok = HandoffScriptRunner([Return(answer="ok")], engine="grok")
+    cfg = _make_multi_cfg(transport, [omp, grok])
+
+    async def poller(_cfg):
+        yield _msg(
+            "/handoff",
+            message_id=10,
+            reply_to_message_id=5,
+            reply_to_text="done\n`omp resume s1`",
+        )
+        yield _cb(callback_data="takopi:compact:confirm", message_id=1)
+
+    await run_main_loop(cfg, poller)
+    # Phase 2 on omp (source), grok never called.
+    assert len(omp.calls) >= 2
+    assert grok.calls == []
+    texts = [s["message"].text.lower() for s in transport.send_calls]
+    assert any("new omp session" in t for t in texts), texts
+
+
+@pytest.mark.anyio
+async def test_compact_to_other_engine_forces_handoff() -> None:
+    """Test 12: /compact to grok on a true-compaction engine -> approval, NOT native."""
+    transport = FakeTransport()
+    codex = CompactableScriptRunner(
+        [Return(answer="ok")], engine=CODEX, compact_answer="summary"
+    )
+    grok = HandoffScriptRunner([Return(answer="ok")], engine="grok")
+    cfg = _make_multi_cfg(transport, [codex, grok])
+
+    async def poller(_cfg):
+        yield _msg(
+            "/compact to grok",
+            message_id=10,
+            reply_to_message_id=5,
+            reply_to_text="done\n`codex resume c1`",
+        )
+
+    await run_main_loop(cfg, poller)
+    # No native compact happened.
+    assert codex.compact_calls == []
+    # Approval card was shown.
+    assert any(
+        "approve handoff" in str(s["message"].extra) for s in transport.send_calls
+    )
+
+
+@pytest.mark.anyio
+async def test_cross_engine_unknown_destination_error_no_card() -> None:
+    """Test 11: unavailable destination -> error reply, NO approval card."""
+    transport = FakeTransport()
+    omp = HandoffScriptRunner([Return(answer="summary")], engine="omp")
+    # grok is configured but unavailable (missing_cli).
+    grok_unavailable = RunnerEntry(
+        engine="grok",
+        runner=HandoffScriptRunner([Return(answer="ok")], engine="grok"),
+        status="missing_cli",
+    )
+    cfg = _make_multi_cfg(transport, [omp], unavailable_entries=[grok_unavailable])
+
+    async def poller(_cfg):
+        yield _msg(
+            "/handoff to grok",
+            message_id=10,
+            reply_to_message_id=5,
+            reply_to_text="done\n`omp resume s1`",
+        )
+
+    await run_main_loop(cfg, poller)
+    assert omp.calls == []
+    texts = [s["message"].text.lower() for s in transport.send_calls]
+    # Error reply mentions the engine is not available.
+    assert any("not available" in t for t in texts), texts
+    # No approval card.
+    assert not any(
+        "approve handoff" in str(s["message"].extra) for s in transport.send_calls
+    )
+
+
+@pytest.mark.anyio
+async def test_cross_engine_handoff_decline_nothing_runs() -> None:
+    """Test 13: decline -> nothing runs; store unchanged."""
+    transport = FakeTransport()
+    omp = HandoffScriptRunner([Return(answer="summary")], engine="omp")
+    grok = HandoffScriptRunner([Return(answer="ok")], engine="grok")
+    cfg = _make_multi_cfg(transport, [omp, grok])
+
+    async def poller(_cfg):
+        yield _msg(
+            "/handoff to grok",
+            message_id=10,
+            reply_to_message_id=5,
+            reply_to_text="done\n`omp resume s1`",
+        )
+        yield _cb(callback_data="takopi:compact:decline", message_id=1)
+
+    await run_main_loop(cfg, poller)
+    assert omp.calls == []
+    assert grok.calls == []
+    edit_texts = [s["message"].text.lower() for s in transport.edit_calls]
+    assert any("cancelled" in t for t in edit_texts), edit_texts
+
+
+@pytest.mark.anyio
+async def test_cross_engine_none_source_to_destination() -> None:
+    """Test 14: None-engine source with `to` -> migration to destination."""
+    transport = FakeTransport()
+    codex = ScriptRunner([Return(answer="summary")], engine=CODEX)
+    grok = HandoffScriptRunner([Return(answer="ok")], engine="grok")
+    cfg = _make_multi_cfg(transport, [codex, grok])
+
+    async def poller(_cfg):
+        yield _msg(
+            "/compact to grok",
+            message_id=10,
+            reply_to_message_id=5,
+            reply_to_text="done\n`codex resume c1`",
+        )
+
+    await run_main_loop(cfg, poller)
+    # Approval card shown (codex is `none` support, forced handoff anyway).
+    texts = [s["message"].text.lower() for s in transport.send_calls]
+    assert any("from codex" in t and "grok" in t for t in texts), texts
+
+
+@pytest.mark.parametrize(
+    "src_engine,dst_engine",
+    [
+        ("omp", "grok"),
+        ("grok", "omp"),
+        ("codex", "claude"),
+        ("claude", "codex"),
+        ("omp", "codex"),
+        ("codex", "grok"),
+    ],
+)
+@pytest.mark.anyio
+async def test_cross_engine_parametrized_pairs(
+    src_engine: EngineId,
+    dst_engine: EngineId,
+) -> None:
+    """Test 15: representative source x destination pairs all show approval card."""
+    transport = FakeTransport()
+    src = HandoffScriptRunner([Return(answer="summary")], engine=src_engine)
+    dst = HandoffScriptRunner([Return(answer="ok")], engine=dst_engine)
+    cfg = _make_multi_cfg(transport, [src, dst])
+
+    async def poller(_cfg):
+        yield _msg(
+            f"/handoff to {dst_engine}",
+            message_id=10,
+            reply_to_message_id=5,
+            reply_to_text=f"done\n`{src_engine} resume s1`",
+        )
+
+    await run_main_loop(cfg, poller)
+    texts = [s["message"].text.lower() for s in transport.send_calls]
+    assert any(f"from {src_engine}" in t and dst_engine in t for t in texts), texts

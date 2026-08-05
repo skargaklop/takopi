@@ -71,8 +71,8 @@ This line is parsed from replies and takes precedence over new directives.
 | `/plan` | Show sticky plan mode; `/plan on` \| `off` \| `clear` for chat/topic scope. Free-form `/plan <prompt>` (optionally with `/engine`) starts a **plan-mode agent run**. |
 | `/goal` | Bare `/goal` shows help. `/goal <condition>` starts a **goal-mode agent run**. |
 | `/queue` | Show FIFO queue depth and previews for the active thread (reply to progress/final if needed). |
-| `/compact` | Compact the current session's context. Works in any position relative to engine selectors (`/codex /compact` = `/compact /codex`). Optional free-form text passes instructions (e.g. `/compact keep test plan`). Reply to any progress/final message or use in a chat/topic with an active session. Engines with native compaction (claude, pi, codex, opencode) run immediately. Engines without native compaction (grok, omp, agy, or unsupported) show an approval card: approve to produce a handoff summary and start a new session seeded with it (actual context reduction). |
-| `/handoff` | Start a new session with a handoff summary from the current session — for **every** engine, including those with native compaction. Works in any position relative to engine selectors (`/codex /handoff` = `/handoff /codex`). Optional free-form text passes instructions (e.g. `/handoff keep the test plan`). Always shows an approval card first (two buttons); on approve: (1) handoff summary produced in the old session, (2) new session seeded with the full summary, (3) routing flips to the new session, (4) summary echoed (truncated). Reply to any progress/final message or use in a chat/topic with an active session. |
+| `/compact` | Compact the current session's context. Works in any position relative to engine selectors (`/codex /compact` = `/compact /codex`). Optional free-form text passes instructions (e.g. `/compact keep test plan`). Optional `to <engine>` migrates to a different engine (e.g. `/compact to grok` forces the handoff-migration path). Reply to any progress/final message or use in a chat/topic with an active session. Engines with native compaction (claude, pi, codex, opencode) run immediately. Engines without native compaction (grok, omp, agy, or unsupported) show an approval card: approve to produce a handoff summary and start a new session seeded with it (actual context reduction). |
+| `/handoff` | Start a new session with a handoff summary from the current session — for **every** engine, including those with native compaction. Works in any position relative to engine selectors (`/codex /handoff` = `/handoff /codex`). Optional free-form text passes instructions (e.g. `/handoff keep the test plan`). Optional `to <engine>` migrates to a different engine (e.g. `/handoff to grok`). Always shows an approval card first (two buttons); on approve: (1) handoff summary produced in the old session, (2) new session seeded with the full summary, (3) routing flips to the new session, (4) summary echoed (truncated). Reply to any progress/final message or use in a chat/topic with an active session. |
 | `/file put <path>` | Upload a document into the repo/worktree (requires `transports.telegram.files.enabled`). |
 | `/file get <path>` | Fetch a file or directory back into Telegram. |
 
@@ -113,6 +113,18 @@ Both share the same engine-resolution, session-resolution, and migration executo
 - **`/handoff`** = always start a new session with a handoff summary, for **every** engine — including those that can compact natively. Ignores `compact_support()` entirely.
 
 On engines without native compaction, `/compact` and `/handoff` are identical. On engines with native compaction, `/compact` compacts in place while `/handoff` forces the handoff-migration (clean session break with a summary).
+
+### Cross-engine handoff (`to <engine>`)
+
+Both commands accept an optional `to <engine>` clause to migrate the session to a **different** engine:
+
+```text
+/handoff to grok           # handoff from the current engine to a new grok session
+/compact to grok           # same migration (forces handoff even on compaction-capable engines)
+/handoff /omp to grok keep tests  # source selector + destination + instructions
+```
+
+The destination engine only receives the seed prompt through normal `run()` — it never needs compact support, so any configured engine is valid. Unknown or unavailable destinations produce an error reply before any approval card. When the destination equals the source (or no `to` clause is given), the behavior is unchanged (same-engine handoff).
 
 ## CLI
 

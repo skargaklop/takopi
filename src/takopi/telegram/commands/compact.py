@@ -32,6 +32,7 @@ class PendingCompactConfirm:
     user_msg_id: int
     thread_id: int | None
     session_key: tuple[int, int | None] | None
+    destination_engine: EngineId | None = None
 
 
 async def handle_compact_command(
@@ -52,6 +53,7 @@ async def handle_compact_command(
     state: TelegramLoopState,
     ambient_context: RunContext | None,
     force_handoff: bool = False,
+    destination_engine: EngineId | None = None,
 ) -> None:
     """Resolve an existing session and enqueue a compact job on the scheduler.
 
@@ -143,13 +145,37 @@ async def handle_compact_command(
     runner = resolved.runner
     support = get_compact_support(runner)
 
+    # --- Destination validation ---
+    # A cross-engine destination must resolve to an available runner BEFORE
+    # we show the approval card (avoid wasting an agent turn on phase 1).
+    cross_engine = (
+        destination_engine is not None and destination_engine != resume_token.engine
+    )
+    if cross_engine:
+        dest_resolved = cfg.runtime.resolve_runner(
+            resume_token=None,
+            engine_override=destination_engine,
+        )
+        if not dest_resolved.available:
+            await reply(
+                text=f"engine {destination_engine} is not available for handoff."
+            )
+            return
+
     # --- Approval gate ---
     # Entered when: (a) /handoff (force_handoff=True, any engine), or
-    # (b) /compact on an engine without true compaction (D1: handoff_only + none).
+    # (b) /compact on an engine without true compaction (D1: handoff_only + none), or
+    # (c) a cross-engine destination is requested (to <engine>) — in-place
+    # compaction cannot satisfy a cross-engine migration.
     # The flow: approve -> phase 1 (handoff summary in OLD session) ->
     # phase 2 (seed NEW session with summary) -> routing flips.
-    if force_handoff or not support.true_compaction:
-        if force_handoff and support.true_compaction:
+    if force_handoff or cross_engine or not support.true_compaction:
+        dest_label = destination_engine if cross_engine else resume_token.engine
+        if cross_engine:
+            prefix = (
+                f"Handoff from {resume_token.engine} to a NEW {dest_label} session?\n\n"
+            )
+        elif force_handoff and support.true_compaction:
             # /handoff on a compaction-capable engine: neutral wording
             # (do NOT claim the engine "cannot compact").
             prefix = (
@@ -187,6 +213,7 @@ async def handle_compact_command(
                 user_msg_id=user_msg_id,
                 thread_id=msg.thread_id,
                 session_key=chat_session_key,
+                destination_engine=destination_engine if cross_engine else None,
             )
         return
 
@@ -287,6 +314,7 @@ async def handle_compact_confirm_callback(
             goal=None,
             kind="handoff",
             compact_instructions=pending.instructions,
+            handoff_target=pending.destination_engine,
         )
         await cfg.bot.answer_callback_query(q.callback_query_id, text="sending…")
         await scheduler.enqueue(job)

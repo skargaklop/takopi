@@ -181,3 +181,92 @@ def test_compact_matrix_regression_engine_first() -> None:
     assert inv is not None
     assert inv.engine == "claude"
     assert inv.instructions == "keep tests"
+
+
+# ---------------------------------------------------------------------------
+# Cross-engine destination clause (``to <engine>``)
+# ---------------------------------------------------------------------------
+
+
+def test_handoff_to_destination_unknown_stays_instructions() -> None:
+    """`to <unknown-engine>` is NOT consumed — stays as instructions."""
+    from takopi.telegram.commands.parse import parse_handoff_invocation
+
+    inv = parse_handoff_invocation("/handoff to grok", engine_ids=_EIDS)
+    assert inv is not None
+    assert inv.engine is None
+    assert inv.destination_engine is None
+    assert inv.instructions == "to grok"
+
+
+def test_handoff_to_known_destination() -> None:
+    from takopi.telegram.commands.parse import parse_handoff_invocation
+
+    eids = ("codex", "claude", "grok", "omp")
+    inv = parse_handoff_invocation("/handoff to grok", engine_ids=eids)
+    assert inv is not None
+    assert inv.engine is None
+    assert inv.destination_engine == "grok"
+    assert inv.instructions is None
+
+
+def test_handoff_to_destination_with_slash() -> None:
+    from takopi.telegram.commands.parse import parse_handoff_invocation
+
+    eids = ("codex", "claude", "grok")
+    inv = parse_handoff_invocation("/handoff to /grok", engine_ids=eids)
+    assert inv is not None
+    assert inv.destination_engine == "grok"
+    assert inv.instructions is None
+
+
+def test_handoff_source_and_destination_and_instructions() -> None:
+    from takopi.telegram.commands.parse import parse_handoff_invocation
+
+    eids = ("codex", "claude", "grok", "omp")
+    inv = parse_handoff_invocation("/handoff /omp to grok keep tests", engine_ids=eids)
+    assert inv is not None
+    assert inv.engine == "omp"
+    assert inv.destination_engine == "grok"
+    assert inv.instructions == "keep tests"
+
+
+def test_handoff_to_non_engine_stays_instructions() -> None:
+    from takopi.telegram.commands.parse import parse_handoff_invocation
+
+    eids = ("codex", "claude", "grok")
+    inv = parse_handoff_invocation("/handoff to do list", engine_ids=eids)
+    assert inv is not None
+    assert inv.destination_engine is None
+    assert inv.instructions == "to do list"
+
+
+def test_handoff_to_unknown_engine_stays_instructions() -> None:
+    from takopi.telegram.commands.parse import parse_handoff_invocation
+
+    eids = ("codex", "claude", "grok")
+    inv = parse_handoff_invocation("/handoff to unknownengine", engine_ids=eids)
+    assert inv is not None
+    assert inv.destination_engine is None
+    assert inv.instructions == "to unknownengine"
+
+
+def test_compact_to_destination() -> None:
+    from takopi.telegram.commands.parse import parse_compact_invocation
+
+    eids = ("codex", "claude", "grok")
+    inv = parse_compact_invocation("/compact to grok", engine_ids=eids)
+    assert inv is not None
+    assert inv.destination_engine == "grok"
+    assert inv.instructions is None
+
+
+def test_handoff_no_to_regression() -> None:
+    """Regression: no ``to`` clause -> destination None (backward compat)."""
+    from takopi.telegram.commands.parse import parse_handoff_invocation
+
+    eids = ("codex", "claude", "grok")
+    inv = parse_handoff_invocation("/handoff keep tests", engine_ids=eids)
+    assert inv is not None
+    assert inv.destination_engine is None
+    assert inv.instructions == "keep tests"

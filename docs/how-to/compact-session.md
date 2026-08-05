@@ -119,3 +119,15 @@ The flow is identical to the [handoff-as-new-session](#handoff-as-new-session-gr
 | `/handoff` | Handoff migration (with approval) | Handoff migration (with approval) |
 
 On no-compaction engines, `/compact` and `/handoff` behave identically.
+
+### Cross-engine handoff (`to <engine>`)
+
+Both `/compact` and `/handoff` accept an optional `to <engine>` clause to migrate the session to a **different** engine — e.g. from omp to grok:
+
+```text
+/handoff to grok                 # handoff from the current engine to a new grok session
+/compact to grok                 # same (forces handoff even on compaction-capable engines)
+/handoff /omp to grok keep tests # source selector + destination + instructions
+```
+
+The destination engine receives the seed prompt via a normal `run()` — it does not need compact support, so any configured engine works. If the destination is unknown or unavailable, Takopi replies with an error before showing any approval card.

@@ -36,10 +36,18 @@ def _parse_slash_command(text: str) -> tuple[str | None, str]:
 
 @dataclass(frozen=True, slots=True)
 class CompactInvocation:
-    """Parsed result of a /compact (or /handoff) invocation with optional engine selector."""
+    """Parsed result of a /compact (or /handoff) invocation.
+
+    Attributes:
+        engine: source engine selector (explicit ``/engine`` before the flag).
+        instructions: free-form instruction text after flags/selectors.
+        destination_engine: target engine for a cross-engine handoff
+            (``to <engine>`` clause). None means same-engine (backward compat).
+    """
 
     engine: EngineId | None
     instructions: str | None
+    destination_engine: EngineId | None = None
 
 
 def parse_command_invocation(
@@ -55,6 +63,13 @@ def parse_command_invocation(
     order. A second engine selector raises ``ValueError`` (mirrors
     parse_directives "multiple engine directives"). First non-slash or
     unknown slash token stops scanning; the remainder is the instructions.
+
+    After the flag/source tokens, an optional ``to <engine>`` clause may
+    appear: the bare word ``to`` followed by a known engine id (leading
+    ``/`` tolerated: ``to /grok``). Both tokens are consumed ONLY when the
+    id matches a known engine. ``to`` followed by a non-engine word is NOT
+    a clause — the text stays as instructions. At most one ``to`` clause
+    is consumed; a second becomes instructions.
 
     Returns ``None`` when no ``flag`` token is found among the leading
     slash tokens.
@@ -106,6 +121,22 @@ def parse_command_invocation(
     if not found_flag:
         return None
 
+    # --- Optional ``to <engine>`` destination clause ---
+    # Consume the bare word "to" + a known engine id (leading "/" tolerated).
+    # Only when the id is known; otherwise "to ..." stays as instructions.
+    destination_engine: EngineId | None = None
+    remaining = tokens[consumed:]
+    if len(remaining) >= 2 and remaining[0].lower() == "to":
+        dest_token = remaining[1]
+        dest_name = dest_token.lstrip("/")
+        if "@" in dest_name:
+            dest_name = dest_name.split("@", 1)[0]
+        dest_key = dest_name.lower()
+        dest_candidate = engine_map.get(dest_key)
+        if dest_candidate is not None:
+            destination_engine = dest_candidate
+            consumed += 2
+
     # Reconstruct instructions from remaining tokens on this line + following lines.
     remaining_on_line = tokens[consumed:]
     tail_lines = lines[1:]
@@ -117,7 +148,11 @@ def parse_command_invocation(
     raw_instructions = " ".join(parts).strip() if parts else ""
     instructions = normalize_instructions(raw_instructions)
 
-    return CompactInvocation(engine=engine, instructions=instructions)
+    return CompactInvocation(
+        engine=engine,
+        instructions=instructions,
+        destination_engine=destination_engine,
+    )
 
 
 def parse_compact_invocation(
