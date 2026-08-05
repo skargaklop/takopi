@@ -227,3 +227,43 @@ def test_inactive_when_files_disabled(tmp_path: Path) -> None:
     assert result.files == ()
     # Markers left as plain text when files.enabled is false (no send).
     assert "[[takopi-send: a.md]]" in result.answer
+
+
+# ---------------------------------------------------------------------------
+# Task 12: plan-mode read-only contradiction — enforcement variants
+# ---------------------------------------------------------------------------
+
+
+def test_append_send_instruction_native_readonly_no_file_requirement() -> None:
+    """native_readonly: text-answer wording; no 'MUST produce' file requirement."""
+    s = _settings()
+    out = append_send_instruction(
+        "fix it", settings=s, plan_mode=True, enforcement="native_readonly"
+    )
+    assert "fix it" in out
+    # Read-only variant: no mandatory file write instruction.
+    assert "MUST produce" not in out
+    assert "Do NOT write files" in out
+    assert "Takopi saves and delivers your plan automatically" in out
+
+
+def test_append_send_instruction_soft_plan_unchanged() -> None:
+    """Soft variant is byte-identical to the current behavior (regression)."""
+    s = _settings()
+    soft_out = append_send_instruction(
+        "fix it", settings=s, plan_mode=True, enforcement="soft"
+    )
+    default_out = append_send_instruction("fix it", settings=s, plan_mode=True)
+    # Default is soft; explicit soft is identical.
+    assert soft_out == default_out
+    assert "MUST produce" in soft_out
+
+
+def test_append_send_instruction_no_plan_mode_ignores_enforcement() -> None:
+    """enforcement has no effect when plan_mode is False."""
+    s = _settings()
+    out = append_send_instruction(
+        "fix it", settings=s, plan_mode=False, enforcement="native_readonly"
+    )
+    assert "PLAN MODE" not in out
+    assert "Do NOT write files" not in out

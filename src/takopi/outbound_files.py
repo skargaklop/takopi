@@ -100,6 +100,7 @@ def build_send_instruction(
     *,
     extensions: Sequence[str],
     plan_mode: bool = False,
+    enforcement: str = "soft",
 ) -> str:
     ext_list = ", ".join(normalize_extension(e) for e in extensions if e)
     lines = [
@@ -112,12 +113,22 @@ def build_send_instruction(
         "Paths must resolve inside the project (absolute or relative).",
     ]
     if plan_mode:
-        lines.extend(
-            [
-                "PLAN MODE: you MUST produce a plan as a .md (preferred) or .html file",
-                "and include a [[takopi-send: ...]] marker for it before finishing.",
-            ]
-        )
+        if enforcement == "native_readonly":
+            lines.extend(
+                [
+                    "PLAN MODE (read-only): present the plan as your final TEXT answer.",
+                    "Do NOT write files or run mutating commands - the harness forbids"
+                    " them and will cancel the turn.",
+                    "Takopi saves and delivers your plan automatically.",
+                ]
+            )
+        else:
+            lines.extend(
+                [
+                    "PLAN MODE: you MUST produce a plan as a .md (preferred) or .html file",
+                    "and include a [[takopi-send: ...]] marker for it before finishing.",
+                ]
+            )
     return "\n".join(lines)
 
 
@@ -126,12 +137,14 @@ def append_send_instruction(
     *,
     settings: OutboundSettings,
     plan_mode: bool = False,
+    enforcement: str = "soft",
 ) -> str:
     if not settings.active:
         return prompt
     block = build_send_instruction(
         extensions=settings.send_extensions,
         plan_mode=plan_mode,
+        enforcement=enforcement,
     )
     body = prompt.strip()
     if not body:

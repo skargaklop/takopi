@@ -723,3 +723,47 @@ def test_tool_sample_end_to_end() -> None:
     assert len(completed_actions) >= 2
     # Usage telemetry present.
     assert completed[0].usage is not None
+
+
+# ---------------------------------------------------------------------------
+# Task 12: plan-mode read-only cancellation message
+# ---------------------------------------------------------------------------
+
+
+def test_plan_mode_cancelled_has_readonly_explanation() -> None:
+    """Plan-mode run cancelled by harness -> honest read-only explanation."""
+    state = GrokStreamState(
+        resume=ResumeToken(engine=ENGINE, value="dddddddd-dddd-dddd-dddd-dddddddddddd"),
+        started=False,
+        plan_mode=True,
+    )
+    events = translate_grok_event(
+        grok_schema.decode_event(
+            b'{"type":"end","stopReason":"cancelled","sessionId":"dddddddd-dddd-dddd-dddd-dddddddddddd"}'
+        ),
+        title="grok",
+        state=state,
+    )
+    completed = [e for e in events if isinstance(e, CompletedEvent)][0]
+    assert completed.ok is False
+    assert "read-only" in (completed.error or "").lower()
+    assert "forbidden" in (completed.error or "").lower()
+
+
+def test_non_plan_cancelled_keeps_old_message() -> None:
+    """Non-plan cancellation keeps the existing message (no mislabeling)."""
+    state = GrokStreamState(
+        resume=ResumeToken(engine=ENGINE, value="dddddddd-dddd-dddd-dddd-dddddddddddd"),
+        started=False,
+        plan_mode=False,
+    )
+    events = translate_grok_event(
+        grok_schema.decode_event(
+            b'{"type":"end","stopReason":"cancelled","sessionId":"dddddddd-dddd-dddd-dddd-dddddddddddd"}'
+        ),
+        title="grok",
+        state=state,
+    )
+    completed = [e for e in events if isinstance(e, CompletedEvent)][0]
+    assert completed.ok is False
+    assert completed.error == "grok run stopped (cancelled)"

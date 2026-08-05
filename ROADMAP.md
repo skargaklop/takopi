@@ -403,6 +403,43 @@ Live evidence 2026-08-05: every grok run logs `jsonl.msgspec.invalid` warnings f
 - **Forward compat (requirement 4):** `decode_event` peeks the `type` field before decoding. Known types go through the tagged-union decoder; unknown types return `StreamUnknownEvent(type_name=...)` — no `ValidationError`, no WARNING. Only genuinely malformed JSON reaches `decode_error_events` and logs a WARNING.
 - **Tool-kind mapping:** Grok provides its own `kind`/`title` fields on `tool_call` (e.g. `kind="list"`, `title="list_dir"`), but these don't map to takopi's `ActionKind` literal. The shared `tool_kind_and_title` helper is used instead for consistency with the claude runner. Unrecognized grok tool names (e.g. `list_dir`, `read_file`) fall through to generic `("tool", <toolName>)`.
 
+---
+
+## Task 12: Plan-Mode Read-Only Contradiction (Self-Cancellation) (DONE)
+
+### Problem
+
+Live evidence 2026-08-05: repeated `grok run stopped (cancelled)` mid-run in plan mode. The spawn log shows the contradiction in one frame: the prompt commands "PLAN MODE: you MUST produce a plan as a .md ... before finishing" while args contain `--permission-mode plan` (harness-enforced read-only). Both cancellations fired as the agent attempted to act (run verification / edit ROADMAP); the CLI exits rc=0 with `stopReason=cancelled`. Root cause: `build_send_instruction(plan_mode=True)` (`outbound_files.py:114-120`) appends a mandatory plan-file write to EVERY plan-mode prompt, but native plan-mode runners (grok `grok.py:351`, claude `claude.py:324`) forbid writes; the grok harness cancels the whole turn on forbidden operations. The instruction is also redundant: `plan_auto_file` already auto-delivers `outgoing/plan-*.md` from the answer text. Soft-plan runners (codex, omp, opencode) are unaffected. (Task 11 post-notes classified the cancel as "CLI-internal"; this task identifies the concrete trigger and removes it.)
+
+### Requirements
+
+1. Mode-aware plan instruction: runners declare `plan_enforcement` (`native_readonly` vs `soft`, mirroring the compact_support attribute pattern); native runners get a read-only variant - plan as final TEXT answer, no write/execute instructions, Takopi auto-delivers.
+2. Native plan runs complete WITHOUT self-cancellation; the plan reaches the user via `plan_auto_file` (no harness writes).
+3. Honest cancellation surfacing: plan-mode `stopReason=cancelled` maps to a read-only explanation message; non-plan cancels keep the existing text.
+4. Audit claude native plan mode with the same prompt (cancel vs graceful deny); wording fix applies regardless.
+5. Soft-plan path byte-identical (wording and file delivery unchanged).
+
+### Plan
+
+- `docs/plans/2026-08-05-plan-mode-readonly-contradiction.md` - approved spec.
+
+### Scope
+
+- `src/takopi/outbound_files.py` - enforcement-aware instruction variants
+- `src/takopi/runners/grok.py`, `claude.py` - `plan_enforcement` attribute, cancellation mapping
+- Injection call site (`runner_bridge.py` or executor)
+- `tests/test_outbound_files.py`, `tests/test_grok_runner.py`, (conditional) `tests/test_claude_runner.py`
+- docs + `changelog.md`
+
+
+### Post-implementation notes
+
+- **Enforcement wiring:** `GrokRunner.plan_enforcement = "native_readonly"` and `ClaudeRunner.plan_enforcement = "native_readonly"` (class attributes, default `"soft"` everywhere else). The executor reads `getattr(entry.runner, "plan_enforcement", "soft")` and passes it to `append_send_instruction(enforcement=...)`.
+- **Cancellation mapping (grok only):** `GrokStreamState.plan_mode: bool` is set `True` in `build_args` when `--permission-mode plan` is used. The `StreamEndEvent` case checks `state.plan_mode and stop in {"cancelled","canceled"}` → produces the read-only explanation. Non-plan cancels keep `"grok run stopped (cancelled)"`. Claude does not self-cancel on forbidden writes (its harness denies gracefully), so no claude-side cancellation mapping was needed.
+- **Claude audit (requirement 4):** Claude's harness in `--permission-mode plan` does NOT cancel the turn on forbidden writes — it denies the tool call and continues. The wording fix (read-only variant) still applies to avoid confusing the agent, but no cancellation mapping is needed for claude.
+- **Auto-file delivery:** `plan_auto_file` (default-on) writes `outgoing/plan-<ts>.md` from the answer text. Native plan runners now rely on this path exclusively (no `[[takopi-send]]` marker expected).
+---
+
 ## Workflow Convention
 
 All non-trivial tasks in this roadmap follow this sequence:

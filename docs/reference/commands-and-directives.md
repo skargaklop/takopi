@@ -83,7 +83,7 @@ This line is parsed from replies and takes precedence over new directives.
 [[takopi-send: /absolute/path/file.ext]]
 ```
 
-Allowed extensions come from `send_extensions` (default: jpg/png/gif/pdf/md/html/doc/docx/xls/xlsx). In **plan mode**, a `.md` or `.html` delivery is required (`plan_require_send`); if missing, Takopi can auto-write `outgoing/plan-*.md` (`plan_auto_file`).
+Allowed extensions come from `send_extensions` (default: jpg/png/gif/pdf/md/html/doc/docx/xls/xlsx). In **plan mode**, a `.md` or `.html` delivery is required (`plan_require_send`); if missing, Takopi auto-writes `outgoing/plan-*.md` (`plan_auto_file`) from the answer text. **Native read-only plan runners** (claude, grok with `--permission-mode plan`) cannot write files — they produce the plan as their text answer, and Takopi's auto-file delivery handles the rest. Soft-plan runners (codex, omp, opencode, pi) may write plan files directly.
 | `/topic <project> @branch` | Create/bind a topic (topics enabled). |
 | `/ctx` | Show context binding (chat or topic). |
 | `/ctx set <project> @branch` | Update context binding. |

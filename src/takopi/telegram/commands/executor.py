@@ -232,13 +232,17 @@ async def _run_engine(
                 else None
             )
             plan_mode = bool(run_options is not None and run_options.plan)
+            enforcement = str(getattr(entry.runner, "plan_enforcement", "soft"))
             agent_text = text
             if outbound is not None and outbound.active:
                 # Prefer instruction flag on the raw files settings object.
                 instruct = bool(getattr(files_settings, "send_instruction", True))
                 if instruct:
                     agent_text = append_send_instruction(
-                        text, settings=outbound, plan_mode=plan_mode
+                        text,
+                        settings=outbound,
+                        plan_mode=plan_mode,
+                        enforcement=enforcement,
                     )
 
             async def process_outbound(answer: str) -> str:

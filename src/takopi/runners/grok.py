@@ -55,6 +55,8 @@ class GrokStreamState:
     tool_call_meta: dict[str, tuple[str, str]] = field(default_factory=dict)
     # Mid-stream usage events (merged into terminal CompletedEvent; end wins).
     mid_stream_usage: dict[str, Any] | None = None
+    # True when the run was launched in plan mode (native read-only).
+    plan_mode: bool = False
 
 
 def _coerce_comma_list(value: Any) -> str | None:
@@ -267,7 +269,16 @@ def translate_grok_event(
                 usage["mid_stream_usage"] = state.mid_stream_usage
             stop = (event.stopReason or "").lower()
             ok = stop not in {"error", "aborted", "cancelled", "canceled"}
-            error = None if ok else f"grok run stopped ({event.stopReason})"
+            if not ok:
+                if state.plan_mode and stop in {"cancelled", "canceled"}:
+                    error = (
+                        "plan-mode turn cancelled by the harness "
+                        "(attempted a forbidden write/execute in read-only mode)"
+                    )
+                else:
+                    error = f"grok run stopped ({event.stopReason})"
+            else:
+                error = None
             state.last_assistant_text = answer
             out.append(
                 state.factory.completed(
@@ -310,6 +321,9 @@ def translate_grok_event(
 class GrokRunner(HandoffCompactMixin, ResumeTokenMixin, JsonlSubprocessRunner):
     engine: EngineId = ENGINE
     resume_re: re.Pattern[str] = _RESUME_RE
+    # Native plan mode runs read-only (--permission-mode plan); the injection
+    # wording and cancellation messaging adapt accordingly.
+    plan_enforcement: str = "native_readonly"
 
     grok_cmd: str = "grok"
     model: str | None = None
@@ -348,6 +362,7 @@ class GrokRunner(HandoffCompactMixin, ResumeTokenMixin, JsonlSubprocessRunner):
         args.extend(["--output-format", "streaming-json"])
 
         if plan:
+            state.plan_mode = True
             args.extend(["--permission-mode", "plan"])
         elif self.yolo is True:
             args.append("--yolo")

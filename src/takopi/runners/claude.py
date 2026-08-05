@@ -288,6 +288,9 @@ class ClaudeRunner(SlashCompactMixin, ResumeTokenMixin, JsonlSubprocessRunner):
     compact_accepts_instructions = True
     engine: EngineId = ENGINE
     resume_re: re.Pattern[str] = _RESUME_RE
+    # Native plan mode runs read-only (--permission-mode plan); the injection
+    # wording adapts accordingly.
+    plan_enforcement: str = "native_readonly"
 
     def is_resume_line(self, line: str) -> bool:
         return bool(_RESUME_LINE_RE.match(line))
