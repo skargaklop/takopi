@@ -232,6 +232,7 @@ class RunnerSettings(BaseModel):
     startup_timeout_s: float = 60.0
     idle_timeout_s: float = 900.0
     kill_tree_on_cancel: bool = True
+    shutdown_timeout_s: float = 5.0
 
 
 class TakopiSettings(BaseSettings):

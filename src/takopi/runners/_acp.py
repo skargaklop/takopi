@@ -78,6 +78,14 @@ class FakeAcpTransport:
 
 @dataclass
 class AcpClient:
+    """ACP JSON-RPC stdio client.
+
+    When the production subprocess transport lands (Task 6), the spawned
+    process must be closed via ``close_process_streams`` at shutdown to
+    prevent the proactor pipe-transport ``__del__`` noise (see
+    ``docs/reference/shutdown/pipe-transport-cleanup.md``).
+    """
+
     command: str
     args: list[str]
     cwd: str | None = None

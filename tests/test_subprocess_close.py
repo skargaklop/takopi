@@ -15,6 +15,7 @@ from pathlib import Path
 
 import anyio
 import pytest
+from anyio import BrokenResourceError, ClosedResourceError
 
 from takopi.utils.subprocess import DEFAULT_SHUTDOWN_TIMEOUT_S, close_process_streams
 
@@ -93,8 +94,6 @@ async def test_close_process_streams_closes_all_three() -> None:
 @pytest.mark.anyio
 async def test_close_process_streams_tolerates_errors() -> None:
     """Streams raising OSError/ValueError/ClosedResourceError -> no raise."""
-    from anyio import BrokenResourceError, ClosedResourceError
-
     stdin = FakeStream(name="stdin", raise_on_close=OSError("boom"))
     stdout = FakeStream(name="stdout", raise_on_close=ValueError("bad"))
     stderr = FakeStream(name="stderr", raise_on_close=ClosedResourceError())
@@ -151,7 +150,7 @@ async def test_close_process_streams_bounded_by_timeout() -> None:
     proc = FakeProc(stdin, stdout, stderr)
 
     start = time.monotonic()
-    with move_on_after(5.0) as outer:
+    with move_on_after(5.0):
         await close_process_streams(proc, timeout=0.1)
     elapsed = time.monotonic() - start
 
@@ -200,14 +199,10 @@ async def test_manage_subprocess_no_resource_warnings_on_cancel(
     """After manage_subprocess exits under cancellation, the pipe streams
     should have been explicitly closed (no ResourceWarning for the transports).
 
-    We capture ResourceWarnings raised during the context teardown. Because
-    transport __del__ noise fires at interpreter teardown (not in-process),
-    this test checks the *in-process* proxy: that close_process_streams was
-    invoked and that no ResourceWarning is emitted from the context manager
-    itself.
+    We let the subprocess actually start, then cancel the scope so the
+    ``finally`` block runs. We assert that ``close_process_streams`` was
+    invoked during cleanup.
     """
-    import warnings
-
     from takopi.utils import subprocess as subprocess_utils
 
     closed_flag: list[bool] = []
@@ -219,17 +214,15 @@ async def test_manage_subprocess_no_resource_warnings_on_cancel(
 
     monkeypatch.setattr(subprocess_utils, "close_process_streams", tracking_close)
 
-    with warnings.catch_warnings(record=True) as caught:
-        warnings.simplefilter("always", ResourceWarning)
-        with anyio.CancelScope() as scope:
+    with anyio.move_on_after(5) as scope:
+        async with subprocess_utils.manage_subprocess(
+            [sys.executable, "-c", "import time; time.sleep(30)"],
+        ) as proc:
+            # Let the process actually start.
+            assert proc.pid is not None
+            await anyio.sleep(0.1)
             scope.cancel()
-            async with subprocess_utils.manage_subprocess(
-                [sys.executable, "-c", "import time; time.sleep(30)"],
-                stdin=None,
-                stdout=None,
-                stderr=None,
-            ) as proc:
-                await proc.wait()
+            await proc.wait()
 
     assert closed_flag, "close_process_streams was not called during cleanup"
 
@@ -303,22 +296,17 @@ async def test_codex_appserver_stop_closes_streams() -> None:
     """_AppServerClient.stop() closes the process streams after kill+wait."""
     from takopi.runners.codex import _AppServerClient
 
-    history: list[str] = []
-    stdin = FakeStream(name="stdin", close_history=history)
-    stdout = FakeStream(name="stdout", close_history=history)
-    stderr = FakeStream(name="stderr", close_history=history)
+    stdin = FakeStream(name="stdin")
+    stdout = FakeStream(name="stdout")
+    stderr = FakeStream(name="stderr")
 
-    @dataclass
-    class FakeAsyncioProc:
-        returncode: int | None = 0  # already exited
-        pid: int = 99999
-
-    @dataclass
     class FakeAnyioProc:
-        _stdin: FakeStream = stdin
-        _stdout: FakeStream = stdout
-        _stderr: FakeStream = stderr
-        _process: FakeAsyncioProc = field(default_factory=FakeAsyncioProc)
+        """Minimal anyio Process stand-in with already-exited child."""
+
+        def __init__(self) -> None:
+            self._stdin = stdin
+            self._stdout = stdout
+            self._stderr = stderr
 
         @property
         def stdin(self):
@@ -334,14 +322,14 @@ async def test_codex_appserver_stop_closes_streams() -> None:
 
         @property
         def pid(self):
-            return self._process.pid
+            return 99999
 
         @property
         def returncode(self):
-            return self._process.returncode
+            return 0  # already exited — stop() skips kill/wait
 
         async def wait(self):
-            return self._process.returncode or 0
+            return 0
 
         def kill(self):
             pass

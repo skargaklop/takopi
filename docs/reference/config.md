@@ -156,6 +156,27 @@ Control takopi's log output from the config file. Environment variables (`TAKOPI
 
 The `--debug` CLI flag is equivalent to `level = "debug"` + `file = "debug.log"`.
 
+## `runners`
+
+Global lifecycle settings applied to ALL runners.
+
+=== "toml"
+
+    ```toml
+    [runners]
+    startup_timeout_s = 60.0
+    idle_timeout_s = 900.0
+    kill_tree_on_cancel = true
+    shutdown_timeout_s = 5.0
+    ```
+
+| Key | Type | Default | Notes |
+|-----|------|---------|-------|
+| `startup_timeout_s` | float | `60.0` | Seconds to wait for the first JSONL line before declaring a startup timeout. |
+| `idle_timeout_s` | float | `900.0` | Seconds of inactivity between JSONL lines before declaring an idle timeout. |
+| `kill_tree_on_cancel` | bool | `true` | Kill the entire subprocess tree (not just the direct child) on cancellation. |
+| `shutdown_timeout_s` | float | `5.0` | Per-stream timeout when closing stdio pipe transports during shutdown. Bounds cleanup so a wedged pipe cannot hang exit. |
+
 ## Plugins
 
 ### `plugins.enabled`

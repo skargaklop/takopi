@@ -150,7 +150,7 @@ For each new agent, follow this workflow:
 
 ## Task 5: Clean Shutdown Without Asyncio Pipe-Transport Noise (Windows) (DONE)
 
-Resolved by earlier shutdown/cleanup work (`c4e1817`, `fc3f7eb`, `42ccb1a`). User-verified 2026-08-05: Ctrl+C produces no noise. Not implemented as specced: req 3 (config-timeout key) and req 4 (noise-assertion regression test) - the symptom was eliminated without them; re-add only if the noise recurs. Caveat: if the Ctrl+C test was idle-time, re-verify mid-run while an agent subprocess is active.
+Resolved by earlier shutdown/cleanup work (`c4e1817`, `fc3f7eb`, `42ccb1a`). User-verified 2026-08-05: Ctrl+C produces no noise. Engineering artifacts completed per `docs/plans/2026-08-05-shutdown-transport-close.md`: req 2 (explicit `close_process_streams()` at every spawn site — `manage_subprocess` + codex app-server `stop()`), req 3 (`shutdown_timeout_s` config key, bounded per-stream timeout), req 4 (child-interpreter regression test). Investigation findings: `docs/reference/shutdown/pipe-transport-cleanup.md`. Only the mid-run e2e proof (Ctrl+C with a live agent subprocess) remains user-side.
 
 ### Plan
 

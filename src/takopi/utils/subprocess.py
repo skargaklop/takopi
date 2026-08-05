@@ -4,7 +4,7 @@ import os
 import signal
 import subprocess
 from collections.abc import AsyncIterator, Callable, Sequence
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from typing import Any
 
 import anyio
@@ -98,7 +98,7 @@ def _signal_process(
 
 
 async def close_process_streams(
-    proc: Process, *, timeout: float = DEFAULT_SHUTDOWN_TIMEOUT_S
+    proc: Any, *, timeout: float = DEFAULT_SHUTDOWN_TIMEOUT_S
 ) -> None:
     """Explicitly close the stdio pipe transports of *proc*.
 
@@ -109,6 +109,10 @@ async def close_process_streams(
     closed pipe" noise. This helper closes stdin first (it owns the write
     transport), then stdout/stderr, so the transports are properly
     disposed before teardown.
+
+    *proc* is typed :data:`typing.Any` rather than :class:`Process` because
+    the function accesses streams dynamically via ``getattr`` and must
+    accept both real anyio ``Process`` objects and test fakes.
 
     The function is:
 
@@ -122,22 +126,17 @@ async def close_process_streams(
       is swallowed).
     - **Never raises**: always returns normally.
     """
-    streams: list[tuple[str, Any]] = []
-    for name in ("stdin", "stdout", "stderr"):
-        stream = getattr(proc, name, None)
+    streams: list[Any] = []
+    for attr in ("stdin", "stdout", "stderr"):
+        stream = getattr(proc, attr, None)
         if stream is not None:
-            streams.append((name, stream))
-    for name, stream in streams:
-        with anyio.move_on_after(timeout):
-            try:
-                await stream.aclose()
-            except (
-                OSError,
-                ValueError,
-                ClosedResourceError,
-                BrokenResourceError,
-            ):
-                pass  # Already closed, broken, or consumed.
+            streams.append(stream)
+    for stream in streams:
+        with (
+            anyio.move_on_after(timeout),
+            suppress(OSError, ValueError, ClosedResourceError, BrokenResourceError),
+        ):
+            await stream.aclose()
 
 
 @asynccontextmanager
@@ -186,5 +185,8 @@ async def manage_subprocess(
                         await kill_process_tree(proc)
                         await proc.wait()
         # Explicitly close the stdio pipe transports to prevent the proactor
-        # __del__ ResourceWarning / ValueError noise at teardown.
-        await close_process_streams(proc, timeout=close_timeout)
+        # __del__ ResourceWarning / ValueError noise at teardown. Shielded so
+        # the close runs even under cancellation (the whole point of this
+        # cleanup is shutdown / Ctrl+C resilience).
+        with anyio.CancelScope(shield=True):
+            await close_process_streams(proc, timeout=close_timeout)
