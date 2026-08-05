@@ -297,23 +297,31 @@ def test_coalesce_word_granularity_thoughts_into_one_action() -> None:
 
 
 def test_coalesce_thought_text_thought_end_two_actions() -> None:
-    """Test 2: thought, thought, text, thought, end -> TWO note actions."""
+    """Test 2: thought, thought, text, thought, thought, end -> notes + empty answer.
+
+    With answer/narration split: the 'answer' text between thought blocks is
+    narration (not the final answer). It becomes a narration note action, and
+    since there is no trailing text after the second thought block, the final
+    answer is empty.
+    """
     payloads = [
         b'{"type":"thought","data":"first"}',
         b'{"type":"thought","data":" block"}',
-        b'{"type":"text","data":"answer"}',
+        b'{"type":"text","data":"narration"}',
         b'{"type":"thought","data":"second"}',
         b'{"type":"thought","data":" block"}',
         b'{"type":"end","stopReason":"EndTurn","sessionId":"dddddddd-dddd-dddd-dddd-dddddddddddd"}',
     ]
     events, state = _run_events(payloads)
     actions = [e for e in events if isinstance(e, ActionEvent)]
-    assert len(actions) == 2
+    # Three note actions: first thought block, narration text, second thought block.
+    assert len(actions) == 3
     assert "first block" in actions[0].action.title
-    assert "second block" in actions[1].action.title
-    # Text event is NOT part of any action — it accumulates into answer.
+    assert "narration" in actions[1].action.title
+    assert "second block" in actions[2].action.title
+    # No trailing text after the last thought block -> empty answer.
     completed = [e for e in events if isinstance(e, CompletedEvent)][0]
-    assert completed.answer == "answer"
+    assert completed.answer == ""
 
 
 def test_coalesce_empty_thought_no_action() -> None:
@@ -383,7 +391,11 @@ def test_coalesce_thought_flushes_before_end() -> None:
 
 
 def test_coalesce_text_path_unchanged() -> None:
-    """Regression: StreamTextEvent accumulation is byte-identical."""
+    """Regression: StreamTextEvent accumulation is byte-identical.
+
+    Single-turn runs (contiguous text, no thoughts interleaved) produce one
+    text segment; the answer is the full text — backward compatible.
+    """
     payloads = [
         b'{"type":"text","data":"Hello"}',
         b'{"type":"text","data":" from"}',
@@ -393,3 +405,152 @@ def test_coalesce_text_path_unchanged() -> None:
     events, state = _run_events(payloads)
     completed = [e for e in events if isinstance(e, CompletedEvent)][0]
     assert completed.answer == "Hello from Grok."
+
+
+# ---------------------------------------------------------------------------
+# Answer/narration split: final answer contains ONLY the trailing text run;
+# earlier text segments (narration) become coalesced note actions.
+# ---------------------------------------------------------------------------
+
+
+def test_narration_split_answer_is_last_text_block() -> None:
+    """Test 1: narration, thought, narration, answer, end -> answer == last block only.
+
+    Multiple text segments separated by thoughts. The final answer is the
+    trailing text run (after the last thought). Earlier text segments become
+    narration note actions.
+    """
+    payloads = [
+        b'{"type":"text","data":"Let me read the plan first."}',
+        b'{"type":"thought","data":"Thinking"}',
+        b'{"type":"thought","data":" about it"}',
+        b'{"type":"text","data":"Now let me check the code."}',
+        b'{"type":"thought","data":"Done thinking"}',
+        b'{"type":"text","data":"The real answer is 42."}',
+        b'{"type":"end","stopReason":"EndTurn","sessionId":"eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee"}',
+    ]
+    events, state = _run_events(payloads)
+    completed = [e for e in events if isinstance(e, CompletedEvent)][0]
+    # Answer = trailing text run only.
+    assert completed.answer == "The real answer is 42."
+    # Narration segments + thoughts become note actions.
+    actions = [e for e in events if isinstance(e, ActionEvent)]
+    titles = " ".join(a.action.title for a in actions)
+    assert "Let me read the plan first." in titles
+    assert "Now let me check the code." in titles
+
+
+def test_narration_split_single_text_block_backward_compat() -> None:
+    """Test 2: single text block (math shape) -> answer == full text.
+
+    No thoughts interleaved in the text run. One segment → answer = full text.
+    """
+    payloads = [
+        b'{"type":"text","data":"**391**."}',
+        b'{"type":"end","stopReason":"end_turn","sessionId":"ffffffff-ffff-ffff-ffff-ffffffffffff"}',
+    ]
+    events, state = _run_events(payloads)
+    completed = [e for e in events if isinstance(e, CompletedEvent)][0]
+    assert completed.answer == "**391**."
+
+
+def test_narration_split_narration_only_stream() -> None:
+    """Test 3: narration-only stream -> answer == last segment (today's behavior).
+
+    All text segments are narration (separated by thoughts). The last segment
+    is still treated as the answer, same as a run with no clear delimiter.
+    """
+    payloads = [
+        b'{"type":"text","data":"narration one"}',
+        b'{"type":"thought","data":"thinking"}',
+        b'{"type":"text","data":"narration two"}',
+        b'{"type":"end","stopReason":"EndTurn","sessionId":"11111111-1111-1111-1111-111111111111"}',
+    ]
+    events, state = _run_events(payloads)
+    completed = [e for e in events if isinstance(e, CompletedEvent)][0]
+    # Last segment is the answer.
+    assert completed.answer == "narration two"
+    # First narration segment became a note action.
+    actions = [e for e in events if isinstance(e, ActionEvent)]
+    titles = " ".join(a.action.title for a in actions)
+    assert "narration one" in titles
+
+
+def test_narration_split_empty_whitespace_segments_no_action() -> None:
+    """Test 4: empty/whitespace text segments -> no note actions, no empty titles."""
+    payloads = [
+        b'{"type":"text","data":""}',
+        b'{"type":"text","data":"   "}',
+        b'{"type":"thought","data":"real thought"}',
+        b'{"type":"text","data":"answer"}',
+        b'{"type":"end","stopReason":"EndTurn","sessionId":"22222222-2222-2222-2222-222222222222"}',
+    ]
+    events, state = _run_events(payloads)
+    completed = [e for e in events if isinstance(e, CompletedEvent)][0]
+    assert completed.answer == "answer"
+    actions = [e for e in events if isinstance(e, ActionEvent)]
+    # Only the thought action (the empty/whitespace text before it was skipped).
+    assert len(actions) == 1
+    assert "real thought" in actions[0].action.title
+
+
+def test_narration_split_agentic_sample_end_to_end() -> None:
+    """Test 5: replay stream-sample-agentic.jsonl end-to-end.
+
+    Answer == the real final answer from the capture. Narration absent from
+    the answer. Step count sane.
+    """
+    events, state = _run_events(
+        [
+            line
+            for line in (
+                Path(__file__)
+                .parent.parent.joinpath(
+                    "docs",
+                    "reference",
+                    "runners",
+                    "grok",
+                    "stream-sample-agentic.jsonl",
+                )
+                .read_bytes()
+                .splitlines()
+            )
+            if line.strip()
+        ],
+        session_id="e1f2a3b4-0001-0001-0001-000000000001",
+    )
+    completed = [e for e in events if isinstance(e, CompletedEvent)][0]
+    # Answer is the trailing text run only (the ## Summary block).
+    assert completed.answer.startswith("## Summary")
+    assert "Let me read the plan first" not in completed.answer
+    assert "Now let me check" not in completed.answer
+    assert "I see the issue" not in completed.answer
+    # Narration segments became note actions (sane count, not word-level).
+    actions = [e for e in events if isinstance(e, ActionEvent)]
+    assert 3 <= len(actions) <= 10  # narration + thought blocks coalesced
+
+
+def test_narration_split_math_sample_unchanged() -> None:
+    """Test 6: replay stream-sample.jsonl (math) -> answer unchanged.
+
+    The math sample has contiguous text (no thoughts interleaved in the text
+    phase). Coalescing from Task 9 is intact; answer is the full text.
+    """
+    events, state = _run_events(
+        [
+            line
+            for line in (
+                Path(__file__)
+                .parent.parent.joinpath(
+                    "docs", "reference", "runners", "grok", "stream-sample.jsonl"
+                )
+                .read_bytes()
+                .splitlines()
+            )
+            if line.strip()
+        ],
+        session_id="c0503384-0f14-4c4c-ab09-688ff5a0141d",
+    )
+    completed = [e for e in events if isinstance(e, CompletedEvent)][0]
+    assert "**391**." in completed.answer
+    assert completed.ok is True

@@ -342,6 +342,32 @@ Live report 2026-08-05: grok progress renders each WORD as a separate step and o
 - **Sample capture (requirement 5):** Captured real grok CLI JSONL at `docs/reference/runners/grok/stream-sample.jsonl` (374 lines, word-granularity `thought` events). Confirmed thoughts precede text events; join strategy `"".join(chunks)` preserves embedded spaces.
 ---
 
+## Task 10: Grok Final Message Contains Full Narration
+
+### Problem
+
+Live report 2026-08-05: the FINAL grok message dumps the entire reasoning/narration transcript ("Let me read the plan first... Now let me check...") before the real answer; the body split into two Telegram messages. Root cause (evidence-backed): in agentic runs the grok harness emits intermediate narration as `text` stream events; `translate_grok_event` accumulates ALL text chunks into `last_assistant_text` (`grok.py:122-123`), and `render_final_parts` renders the body from the answer only (`markdown.py:236-240`). The Task 9 sample (math prompt) had no narration, hiding the bug.
+
+### Requirements
+
+1. The final message body contains ONLY the actual answer (trailing text run per the approved delimiter rule).
+2. Narration stays visible in PROGRESS as coalesced note actions (Task 9 style); it never leaks into the final body.
+3. Backward compatible: single-turn runs keep the full-text answer; all existing grok tests stay green unless intentionally re-spec'd.
+4. The delimiter rule is validated on a REAL agentic capture before implementation (`docs/reference/runners/grok/stream-sample-agentic.jsonl`).
+5. Engine-local only: no renderer/progress/settings changes, no new config.
+
+### Plan
+
+- `docs/plans/2026-08-05-grok-answer-narration-split.md` - approved spec (text segmentation; last segment = answer; narration -> progress notes).
+
+### Scope
+
+- `src/takopi/runners/grok.py` - text segmentation + narration-to-note coalescing
+- `tests/test_grok_runner.py` - narration/answer split tests + both sample replays
+- `docs/reference/runners/grok/stream-sample-agentic.jsonl` - real agentic capture
+- `changelog.md`
+---
+
 ## Workflow Convention
 
 All non-trivial tasks in this roadmap follow this sequence:

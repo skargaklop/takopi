@@ -39,8 +39,29 @@ See [Config reference — grok](../../config.md#grok).
 
 | Grok `type` | Takopi mapping |
 |-------------|----------------|
-| `text` | Accumulate into `CompletedEvent.answer` |
-| `thought` | Buffered, coalesced into one note `ActionEvent` per contiguous block (flushed by the next non-thought event) |
-| `end` | `CompletedEvent` with usage / sessionId |
-| `error` | `CompletedEvent(ok=False)` |
+| `text` | Accumulate into the current text segment (answer or narration) |
+| `thought` | Buffered, coalesced into one note `ActionEvent` per contiguous block (flushed by the next non-thought event); also closes the current text segment as narration |
+| `end` | `CompletedEvent` with usage / sessionId; answer = trailing text run |
+| `error` | `CompletedEvent(ok=False)`; answer = trailing text run |
 | other | Ignored (msgspec decode error dropped) |
+
+### Answer/narration split
+
+In agentic multi-turn runs, the grok CLI emits `text` events for both
+**narration** (assistant commentary between tool calls, e.g. "Let me read
+the plan first...") and the **final answer**. Without segmentation, all
+text is concatenated into the final message, producing large dumps of
+reasoning followed by the actual answer.
+
+Takopi segments text at `thought` event boundaries: when a thought block
+arrives, the preceding text run is closed as narration and becomes a
+coalesced note action in progress (same flush style as thought coalescing).
+The **trailing text run** (after the last thought, with no subsequent
+thought) is the answer and goes into `CompletedEvent.answer`.
+
+Single-turn Q&A runs (contiguous text, no thoughts interleaved) produce
+one text segment → answer = full text (backward compatible).
+
+See `stream-sample.jsonl` (math, single-turn) and
+`stream-sample-agentic.jsonl` (multi-turn with narration) for reference
+captures.

@@ -41,6 +41,12 @@ class GrokStreamState:
     started: bool = False
     note_seq: int = 0
     pending_thought: list[str] = field(default_factory=list)
+    # Text segmentation for answer/narration split.
+    # current_text accumulates the active text run; text_segments holds
+    # closed narration blocks. The trailing text run (after the last thought)
+    # becomes the answer; earlier segments become coalesced note actions.
+    current_text: str = ""
+    text_segments: list[str] = field(default_factory=list)
 
 
 def _coerce_comma_list(value: Any) -> str | None:
@@ -103,6 +109,46 @@ def _flush_pending_thought(state: GrokStreamState, out: list[TakopiEvent]) -> No
     )
 
 
+def _close_text_segment(state: GrokStreamState) -> None:
+    """Close the current text segment and start a new one.
+
+    When a thought block arrives, the preceding text run is narration (not
+    the final answer). It is moved to ``text_segments`` for later flushing
+    as a coalesced note action.
+    """
+    if state.current_text:
+        state.text_segments.append(state.current_text)
+    state.current_text = ""
+
+
+def _flush_text_segments(state: GrokStreamState, out: list[TakopiEvent]) -> str:
+    """Flush narration text segments as note actions; return the answer.
+
+    The trailing text run (``state.current_text``, not yet closed by a
+    thought) is the answer. All segments in ``state.text_segments`` are
+    closed narration blocks — they become coalesced note actions (one per
+    segment, skipped when empty or whitespace-only, mirroring
+    ``_flush_pending_thought`` rules).
+    """
+    for text in state.text_segments:
+        if not text.strip():
+            continue
+        state.note_seq += 1
+        out.append(
+            state.factory.action_completed(
+                action_id=f"grok.narration.{state.note_seq}",
+                kind="note",
+                title=text,
+                ok=True,
+                detail={},
+            )
+        )
+    state.text_segments.clear()
+    answer = state.current_text
+    state.current_text = ""
+    return answer
+
+
 def translate_grok_event(
     event: grok_schema.GrokEvent,
     *,
@@ -120,15 +166,21 @@ def translate_grok_event(
         case grok_schema.StreamTextEvent(data=data):
             if data:
                 _flush_pending_thought(state, out)
-                state.last_assistant_text += data
+                state.current_text += data
             return out
 
         case grok_schema.StreamThoughtEvent(data=data):
+            # A thought block closes the current text segment (narration).
+            _close_text_segment(state)
             if data:
                 state.pending_thought.append(data)
             return out
 
         case grok_schema.StreamEndEvent():
+            # Flush narration segments before pending thoughts: the narration
+            # was closed by the thought that follows it, so it predates the
+            # pending thought block chronologically.
+            answer = _flush_text_segments(state, out)
             _flush_pending_thought(state, out)
             session_id = event.sessionId or state.resume.value
             resume = ResumeToken(engine=ENGINE, value=session_id)
@@ -140,10 +192,11 @@ def translate_grok_event(
             stop = (event.stopReason or "").lower()
             ok = stop not in {"error", "aborted", "cancelled", "canceled"}
             error = None if ok else f"grok run stopped ({event.stopReason})"
+            state.last_assistant_text = answer
             out.append(
                 state.factory.completed(
                     ok=ok,
-                    answer=state.last_assistant_text,
+                    answer=answer,
                     resume=resume,
                     error=error,
                     usage=usage or None,
@@ -152,15 +205,17 @@ def translate_grok_event(
             return out
 
         case grok_schema.StreamErrorEvent():
+            answer = _flush_text_segments(state, out)
             _flush_pending_thought(state, out)
             session_id = event.sessionId or state.resume.value
             resume = ResumeToken(engine=ENGINE, value=session_id)
             usage = _usage_payload(event)
             message = event.message or "grok run failed"
+            state.last_assistant_text = answer
             out.append(
                 state.factory.completed(
                     ok=False,
-                    answer=state.last_assistant_text,
+                    answer=answer,
                     resume=resume,
                     error=message,
                     usage=usage or None,
@@ -345,12 +400,13 @@ class GrokRunner(HandoffCompactMixin, ResumeTokenMixin, JsonlSubprocessRunner):
                 )
             )
             state.started = True
+        answer = _flush_text_segments(state, out)
         _flush_pending_thought(state, out)
         out.append(self.note_event(message, state=state, ok=False))
         out.append(
             state.factory.completed_error(
                 error=message,
-                answer=state.last_assistant_text,
+                answer=answer,
                 resume=resume_for_completed,
             )
         )
@@ -374,11 +430,12 @@ class GrokRunner(HandoffCompactMixin, ResumeTokenMixin, JsonlSubprocessRunner):
                 )
             )
         state.started = True
+        answer = _flush_text_segments(state, out)
         _flush_pending_thought(state, out)
         out.append(
             state.factory.completed_error(
                 error=message,
-                answer=state.last_assistant_text,
+                answer=answer,
                 resume=resume_for_completed,
             )
         )
