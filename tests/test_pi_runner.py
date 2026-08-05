@@ -11,12 +11,17 @@ from takopi.runners.pi import (
     PiRunner,
     PiStreamState,
     _default_session_dir,
+    detect_plan_mode_extension,
     translate_pi_event,
 )
 from takopi.runners.omp import (
     BACKEND as OMP_BACKEND,
     ENGINE as OMP_ENGINE,
     OmpRunner,
+)
+from takopi.runners.run_options import (
+    EngineRunOptions,
+    apply_run_options,
 )
 from takopi.schemas import pi as pi_schema
 
@@ -373,3 +378,135 @@ def test_pi_single_line_prompt_stays_as_arg() -> None:
     payload = runner.stdin_payload(prompt, None, state=state)
     assert args[-1] == prompt
     assert payload is None
+
+
+# --- plan-mode extension detection ---
+
+
+def test_detect_plan_mode_extension_present(tmp_path: Path) -> None:
+    """Detector returns True when the package dir exists."""
+    root = tmp_path / "node_modules"
+    (root / "@narumitw" / "pi-plan-mode").mkdir(parents=True)
+    assert detect_plan_mode_extension(root) is True
+
+
+def test_detect_plan_mode_extension_absent(tmp_path: Path) -> None:
+    """Detector returns False when the package dir is missing."""
+    root = tmp_path / "node_modules"
+    root.mkdir(parents=True)
+    assert detect_plan_mode_extension(root) is False
+
+
+def test_detect_plan_mode_extension_default_root_exists() -> None:
+    """Default root points at the conventional pi node_modules path."""
+    # The extension is installed on this machine, so default detection is True.
+    assert detect_plan_mode_extension() is True
+
+
+def test_pi_plan_with_extension_appends_flag() -> None:
+    """Plan + extension -> args contain --plan, prompt has NO soft-plan prefix."""
+    runner = PiRunner(
+        extra_args=[], model=None, provider=None, plan_mode_extension=True
+    )
+    state = PiStreamState(resume=ResumeToken(engine=ENGINE, value="s.jsonl"))
+    with apply_run_options(EngineRunOptions(plan=True)):
+        args = runner.build_args("design", None, state=state)
+    assert "--plan" in args
+    # No soft-plan prefix injected
+    assert all(not a.startswith("[Takopi plan mode]") for a in args)
+
+
+def test_pi_plan_without_extension_uses_soft_prompt() -> None:
+    """Plan + no extension -> args have NO --plan, prompt HAS soft-plan prefix."""
+    runner = PiRunner(
+        extra_args=[], model=None, provider=None, plan_mode_extension=False
+    )
+    state = PiStreamState(resume=ResumeToken(engine=ENGINE, value="s.jsonl"))
+    with apply_run_options(EngineRunOptions(plan=True)):
+        args = runner.build_args("design auth", None, state=state)
+        # The soft-plan prefix goes through stdin (it contains newlines).
+        payload = runner.stdin_payload("design auth", None, state=state)
+    assert "--plan" not in args
+    assert payload is not None
+    decoded = payload.decode()
+    assert "[Takopi plan mode]" in decoded
+    assert "design auth" in decoded
+
+
+def test_pi_plan_without_extension_warns_once(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Missing extension logs a one-time warning."""
+    from takopi.runners import pi as pi_module
+
+    calls: list[str] = []
+    original_warning = pi_module.logger.warning
+
+    def capture_warning(event: str, *args: object, **kwargs: object) -> None:
+        calls.append(event)
+        original_warning(event, *args, **kwargs)
+
+    monkeypatch.setattr(pi_module.logger, "warning", capture_warning)
+
+    runner = PiRunner(
+        extra_args=[], model=None, provider=None, plan_mode_extension=False
+    )
+    state = PiStreamState(resume=ResumeToken(engine=ENGINE, value="s.jsonl"))
+    with apply_run_options(EngineRunOptions(plan=True)):
+        runner.build_args("design", None, state=state)
+        assert runner._plan_warning_logged is True
+        # Second call should not warn again.
+        state2 = PiStreamState(resume=ResumeToken(engine=ENGINE, value="s.jsonl"))
+        runner.build_args("design", None, state=state2)
+    assert calls.count("pi.plan_mode_extension_missing") == 1
+
+
+def test_pi_goal_mode_prefix_unchanged() -> None:
+    """Goal mode injects the autonomous-goal prefix (regression)."""
+    runner = PiRunner(
+        extra_args=[], model=None, provider=None, plan_mode_extension=True
+    )
+    state = PiStreamState(resume=ResumeToken(engine=ENGINE, value="s.jsonl"))
+    with apply_run_options(EngineRunOptions(goal="all tests pass")):
+        payload = runner.stdin_payload("body text", None, state=state)
+    assert payload is not None
+    decoded = payload.decode()
+    assert "(autonomous goal — work until: all tests pass)" in decoded
+    assert "body text" in decoded
+
+
+def test_pi_goal_plus_plan_missing_extension_composes() -> None:
+    """Goal + plan (no extension) -> both fallbacks compose, no --plan.
+
+    Goal wins over plan in run_modes(), so the goal prefix is applied and
+    --plan is not appended.  The soft-plan prefix is NOT added because goal
+    takes priority.
+    """
+    runner = PiRunner(
+        extra_args=[], model=None, provider=None, plan_mode_extension=False
+    )
+    state = PiStreamState(resume=ResumeToken(engine=ENGINE, value="s.jsonl"))
+    with apply_run_options(EngineRunOptions(plan=True, goal="done")):
+        args = runner.build_args("body", None, state=state)
+        payload = runner.stdin_payload("body", None, state=state)
+    assert "--plan" not in args
+    assert payload is not None
+    decoded = payload.decode()
+    assert "(autonomous goal — work until: done)" in decoded
+    # Soft-plan prefix is NOT added when goal is active (goal wins).
+    assert "[Takopi plan mode]" not in decoded
+
+
+def test_build_runner_wires_detection(monkeypatch: pytest.MonkeyPatch) -> None:
+    """build_runner stores the detection result on the runner instance."""
+    from takopi.runners import pi as pi_module
+
+    monkeypatch.setattr(pi_module, "detect_plan_mode_extension", lambda root=None: True)
+    runner = pi_module.build_runner({}, Path("takopi.toml"))
+    assert isinstance(runner, PiRunner)
+    assert runner.plan_mode_extension is True
+
+    monkeypatch.setattr(
+        pi_module, "detect_plan_mode_extension", lambda root=None: False
+    )
+    runner = pi_module.build_runner({}, Path("takopi.toml"))
+    assert isinstance(runner, PiRunner)
+    assert runner.plan_mode_extension is False

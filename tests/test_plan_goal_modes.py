@@ -293,10 +293,10 @@ def test_omp_soft_plan_prefixes_prompt() -> None:
 
 
 def test_pi_plan_mode_appends_flag() -> None:
-    """In plan mode the pi runner always appends ``--plan`` (no soft-plan path).
+    """In plan mode with the extension detected, the runner appends ``--plan``.
 
-    The pi-plan-mode extension is the supported mechanism; takopi no longer
-    gates ``--plan`` behind a ``pi.plan_flag`` config flag.
+    The default ``plan_mode_extension=True`` simulates the extension being
+    installed; the soft-plan fallback is covered in ``test_pi_runner.py``.
     """
     runner = PiRunner(extra_args=[], model=None, provider=None)
     state = PiStreamState(resume=ResumeToken(engine=PI_ENGINE, value="s.jsonl"))

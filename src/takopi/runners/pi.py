@@ -27,7 +27,7 @@ from ..model import (
     TakopiEvent,
 )
 from ..runner import JsonlSubprocessRunner, ResumeTokenMixin, Runner
-from .modes import run_modes
+from .modes import apply_soft_plan_prompt, run_modes
 from ._compact_mixin import SlashCompactMixin
 from .run_options import get_run_options
 from ..schemas import pi as pi_schema
@@ -291,10 +291,13 @@ class PiRunner(SlashCompactMixin, ResumeTokenMixin, JsonlSubprocessRunner):
         extra_args: list[str],
         model: str | None,
         provider: str | None,
+        plan_mode_extension: bool = True,
     ) -> None:
         self.extra_args = extra_args
         self.model = model
         self.provider = provider
+        self.plan_mode_extension = plan_mode_extension
+        self._plan_warning_logged = False
 
     def format_resume(self, token: ResumeToken) -> str:
         if token.engine != ENGINE:
@@ -352,19 +355,26 @@ class PiRunner(SlashCompactMixin, ResumeTokenMixin, JsonlSubprocessRunner):
         return session_id
 
     def _final_prompt(self, prompt: str) -> str:
-        """Apply goal mode mutation to the prompt.
+        """Apply goal/plan mode mutations to the prompt.
 
-        Plan mode is delegated to the pi-plan-mode extension via ``--plan`` and
-        does not mutate the prompt. Shared by ``build_args`` and
-        ``stdin_payload`` so both agree on the exact prompt text.
+        - Goal mode: injects the autonomous-goal prefix (unchanged).
+        - Plan mode + extension: delegates to the extension via ``--plan``,
+          no prompt mutation.
+        - Plan mode + no extension: applies the soft-plan prompt prefix
+          (graceful fallback) and logs a one-time warning.
         """
         run_options = get_run_options()
-        _plan, goal = run_modes(run_options)
-        if goal is None:
-            return prompt
-        body = prompt.strip()
-        note = f"(autonomous goal — work until: {goal})"
-        return f"{note}\n\n{body}" if body else note
+        plan, goal = run_modes(run_options)
+        if goal is not None:
+            body = prompt.strip()
+            note = f"(autonomous goal — work until: {goal})"
+            return f"{note}\n\n{body}" if body else note
+        if plan and not self.plan_mode_extension:
+            if not self._plan_warning_logged:
+                logger.warning("pi.plan_mode_extension_missing")
+                self._plan_warning_logged = True
+            return apply_soft_plan_prompt(prompt)
+        return prompt
 
     @staticmethod
     def _prompt_needs_stdin(prompt: str) -> bool:
@@ -398,7 +408,7 @@ class PiRunner(SlashCompactMixin, ResumeTokenMixin, JsonlSubprocessRunner):
             args.extend(["--model", model])
         if run_options is not None and run_options.reasoning:
             args.extend(["--thinking", str(run_options.reasoning)])
-        if plan:
+        if plan and self.plan_mode_extension:
             args.append("--plan")
         session_value = self._resolve_session_path(state.resume.value)
         args.extend(["--session", session_value])
@@ -567,6 +577,26 @@ def _default_session_dir(cwd: PurePath) -> Path:
     return base / "sessions" / safe_path
 
 
+_PLAN_MODE_EXTENSION_PACKAGE = "@narumitw/pi-plan-mode"
+
+
+def detect_plan_mode_extension(root: Path | None = None) -> bool:
+    """True when the ``@narumitw/pi-plan-mode`` extension is installed.
+
+    Checks ``<root>/@narumitw/pi-plan-mode`` (directory existence). The
+    default root is the conventional pi extension install path
+    ``~/.pi/agent/npm/node_modules``. Injectable ``root`` for tests; no
+    config key because the path is a pi-ecosystem convention.
+    """
+    if root is None:
+        agent_dir = os.environ.get("PI_CODING_AGENT_DIR")
+        base = (
+            Path(agent_dir).expanduser() if agent_dir else Path.home() / ".pi" / "agent"
+        )
+        root = base / "npm" / "node_modules"
+    return (root / _PLAN_MODE_EXTENSION_PACKAGE).is_dir()
+
+
 def build_runner(config: EngineConfig, config_path: Path) -> Runner:
     extra_args_value = config.get("extra_args")
     if extra_args_value is None:
@@ -592,6 +622,7 @@ def build_runner(config: EngineConfig, config_path: Path) -> Runner:
         extra_args=extra_args,
         model=model,
         provider=provider,
+        plan_mode_extension=detect_plan_mode_extension(),
     )
 
 

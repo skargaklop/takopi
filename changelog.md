@@ -33,7 +33,7 @@
 
 ### changes
 
-- pi plan mode now always appends `--plan` (delegating to the pi-plan-mode extension) instead of injecting a soft-plan prompt prefix. Removed the `pi.plan_flag` config flag — it is no longer needed.
+- pi plan mode now detects the `@narumitw/pi-plan-mode` extension at runner startup. When detected, `--plan` is appended (delegating to the extension). When absent, Takopi falls back to the shared soft-plan prompt prefix and logs a one-time `pi.plan_mode_extension_missing` warning instead of blindly passing `--plan`. Removed the `pi.plan_flag` config flag — it is no longer needed.
 
 ### fixes
 

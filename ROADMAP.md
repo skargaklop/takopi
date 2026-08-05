@@ -58,6 +58,10 @@ Pi runner does not support `plan` and `goal` modes, even though the required pi 
 4. **Create implementation plan:** Write a `.md` plan document.
 5. **Execute:** Implement via subagent.
 
+### Plan
+
+- `docs/plans/2026-08-05-pi-plan-mode-detection.md` - approved spec (extension detection + graceful fallback; `--plan` append and goal prefix already landed).
+
 ### Scope
 
 - `src/takopi/runners/pi.py` — `build_args()`, extension detection
@@ -342,7 +346,9 @@ Live report 2026-08-05: grok progress renders each WORD as a separate step and o
 - **Sample capture (requirement 5):** Captured real grok CLI JSONL at `docs/reference/runners/grok/stream-sample.jsonl` (374 lines, word-granularity `thought` events). Confirmed thoughts precede text events; join strategy `"".join(chunks)` preserves embedded spaces.
 ---
 
-## Task 10: Grok Final Message Contains Full Narration
+## Task 10: Grok Final Message Contains Full Narration (DONE)
+
+Implemented in `6ba5d99` (text segmentation, narration -> progress notes, both sample replays). User-confirmed in production 2026-08-05.
 
 ### Problem
 
@@ -438,6 +444,37 @@ Live evidence 2026-08-05: repeated `grok run stopped (cancelled)` mid-run in pla
 - **Cancellation mapping (grok only):** `GrokStreamState.plan_mode: bool` is set `True` in `build_args` when `--permission-mode plan` is used. The `StreamEndEvent` case checks `state.plan_mode and stop in {"cancelled","canceled"}` → produces the read-only explanation. Non-plan cancels keep `"grok run stopped (cancelled)"`. Claude does not self-cancel on forbidden writes (its harness denies gracefully), so no claude-side cancellation mapping was needed.
 - **Claude audit (requirement 4):** Claude's harness in `--permission-mode plan` does NOT cancel the turn on forbidden writes — it denies the tool call and continues. The wording fix (read-only variant) still applies to avoid confusing the agent, but no cancellation mapping is needed for claude.
 - **Auto-file delivery:** `plan_auto_file` (default-on) writes `outgoing/plan-<ts>.md` from the answer text. Native plan runners now rely on this path exclusively (no `[[takopi-send]]` marker expected).
+---
+
+---
+
+## Task 13: Grok Tool Titles + Narration Delimiter Upgrade
+
+### Problem
+
+Live evidence 2026-08-05 (pi implementation run):
+1. Progress shows generic identical tool lines ("v tool: run_terminal_command" x5, "v tool: todo_write") with no actual command/path - unlike other harnesses (claude shows "bash: ls"-style titles). Root cause: `tool_kind_and_title` (`tool_actions.py`) knows only claude tool names; grok names (`run_terminal_command`, `read_file`, `search_replace`, `list_dir`, `todo_write`, `spawn_subagent`) fall through to generic `(`"tool"`, name)` (`grok.py:198-201`); real args sit in `rawInput`.
+2. The final message still contains narration ("Good progress - 22 passed... Let me fix both tests:") before the real summary: `_close_text_segment` (`grok.py:120-123`) closes text segments only on thought blocks, so narration produced between tool calls stays glued to the trailing answer segment.
+
+### Requirements
+
+1. Tool actions display like other harnesses: real command/path/pattern titles (`command: uv run pytest ...`, `read: 'file'`, `ls: '.'`) via a grok-local adapter that normalizes names/inputs and delegates to the shared `tool_kind_and_title` (no grok names leak into the shared helper).
+2. Field names for every grok tool's `rawInput` recorded from real captures (`docs/reference/runners/grok/tool-fields.md`) - no guessing.
+3. `tool_call`/`tool_call_update` close the current text segment (like thoughts do): narration between tool calls becomes progress notes; trailing text after the last delimiter is the answer; finals lose the concatenated narration format.
+4. `tool_call_update` completion reuses the SAME kind/title as the start (existing meta cache untouched).
+5. No regressions to Task 9 (coalescing), Task 10 (thought-delimited split), Task 11 (tool actions, usage, unknown types).
+
+### Plan
+
+- `docs/plans/2026-08-05-grok-tool-titles-and-delimiters.md` - approved spec.
+
+### Scope
+
+- `src/takopi/runners/grok.py` - `_grok_tool_kind_and_title` adapter + segment closing on tool events
+- `tests/test_grok_runner.py`
+- `docs/reference/runners/grok/tool-fields.md`, `runner.md`
+- `changelog.md`
+
 ---
 
 ## Workflow Convention

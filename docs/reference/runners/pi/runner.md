@@ -142,5 +142,38 @@ set up credentials before using Takopi.
 
 ---
 
+## Plan and Goal mode
+
+### Plan mode
+
+Takopi detects the `@narumitw/pi-plan-mode` extension at runner startup by
+checking for `~/.pi/agent/npm/node_modules/@narumitw/pi-plan-mode`.
+
+- **Extension present:** `--plan` is appended to the pi CLI args, delegating
+  plan behavior to the extension (read-only tools, structured questions,
+  `plan_mode_complete`).
+- **Extension absent:** `--plan` is NOT appended. Takopi falls back to the
+  shared soft-plan prompt prefix (read-only planning instruction) and logs a
+  one-time `pi.plan_mode_extension_missing` warning.
+
+See [plan-mode-extension.md](plan-mode-extension.md) for the full extension
+contract.
+
+### Goal mode
+
+Goal mode is prompt-based and needs no extension. It prepends
+`(autonomous goal — work until: <condition>)` to the user prompt. When both
+plan and goal are set, goal takes priority (`run_modes` returns the goal and
+clears plan).
+
+### Multi-line prompts and stdin
+
+Both the autonomous-goal prefix and the soft-plan prefix inject newlines into
+the prompt. Because `pi.cmd` (the Windows batch wrapper) rejects argv
+elements containing newlines, multi-line prompts are piped through stdin
+instead of passed as a CLI arg.
+
+---
+
 If you want, I can also add a sample `takopi.toml` snippet to the README or
 include a small quickstart section for Pi in the onboarding panel.
