@@ -6,6 +6,7 @@ from takopi.compact import (
     compact_prompt,
     get_compact_support,
     handoff_prompt,
+    handoff_seed_prompt,
     normalize_instructions,
     warn_if_dropping_instructions,
 )
@@ -78,3 +79,13 @@ def test_get_compact_support_returns_value() -> None:
     support = get_compact_support(HasCompact())
     assert support.mode == "slash_prompt"
     assert support.accepts_instructions is True
+
+
+def test_handoff_seed_prompt_embeds_full_summary() -> None:
+    """handoff_seed_prompt embeds the summary and the acknowledgement instruction."""
+    summary = "Goal: ship feature X. Files: a.py, b.py. Next: write tests."
+    prompt = handoff_seed_prompt(summary)
+    assert summary in prompt  # full summary embedded
+    assert "continuing work from a previous session" in prompt.lower()
+    assert "one-line acknowledgement" in prompt.lower()
+    assert "wait for the user" in prompt.lower()

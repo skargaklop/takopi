@@ -81,3 +81,30 @@
   incorrect when the production path switches to handoff. When migrating a
   runner's compact mode, update both the support-mode tests and the
   delegation tests in the same commit.
+
+## 2026-08-05: Handoff-as-new-session compact flow
+
+- Pre-existing `tg.start_soon(handle_compact_confirm, ..., confirmed=True)` bug
+  in loop.py was masked because no test exercised the compact confirm callback
+  through `run_main_loop`. When adding tests that yield `TelegramCallbackQuery`
+  in the poller, this bug surfaced. `start_soon` does not accept kwargs — always
+  use `functools.partial` for keyword arguments.
+- The approval gate unifies `handoff_only` and `none` engines into one code
+  path (D1 approved). Both show an approval card; the only difference is the
+  disclaimer text. Do not branch on `mode == "none"` separately — check
+  `support.true_compaction` to gate.
+- `run_handoff_job` phase 2 relies on `run_job` wrapping
+  `scheduler.note_thread_known` internally, which writes the new `ResumeToken`
+  to `chat_session_store` on the `StartedEvent`. No explicit store update is
+  needed — the routing flip is automatic. This is the verified mechanic from
+  the plan.
+- The summary echo (D2) must carry the FULL summary in the seed prompt but
+  only a TRUNCATED version to the user display. `prepare_telegram_multi`
+  with `MAX_BODY_CHARS` handles the split; the seed prompt is never truncated.
+- Testing the callback flow through the poller requires yielding a
+  `TelegramCallbackQuery` with `message_id` matching the confirmation card's
+  send-assigned ID. `FakeTransport._next_id` starts at 1, so the first `send`
+  gets `message_id=1` — the callback `_cb(message_id=1)` targets it.
+- The "cancelled" text from a declined callback appears in `transport.edit_calls`,
+  not `transport.send_calls`. Always check both when asserting on callback
+  outcomes.

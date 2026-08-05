@@ -1737,9 +1737,152 @@ async def run_main_loop(
                     thread_id=cast(int | None, job.thread_id),
                 )
 
+            async def run_handoff_job(job: ThreadJob) -> None:
+                """Phase 1: handoff summary in OLD session.
+                Phase 2: seed NEW session with summary; routing flips.
+                """
+                from ..compact import handoff_seed_prompt
+                from ..markdown import MarkdownParts
+                from ..model import CompletedEvent
+                from ..transport import MessageRef, RenderedMessage
+                from .render import MAX_BODY_CHARS, prepare_telegram_multi
+
+                chat_id = cast(int, job.chat_id)
+                user_msg_id = cast(int, job.user_msg_id)
+                thread_id = cast(int | None, job.thread_id)
+
+                # --- Phase 1: produce handoff summary in the OLD session ---
+                entry = cfg.runtime.resolve_runner(
+                    resume_token=job.resume_token,
+                    engine_override=job.resume_token.engine,
+                )
+                runner = entry.runner
+                final_event: CompletedEvent | None = None
+                try:
+                    async for event in runner.compact(
+                        job.resume_token, job.compact_instructions
+                    ):
+                        if isinstance(event, CompletedEvent):
+                            final_event = event
+                except (RuntimeError, OSError, ValueError) as exc:
+                    logger.error("handoff.phase1_failed", error=str(exc))
+                    await send_plain(
+                        cfg.exec_cfg.transport,
+                        chat_id=chat_id,
+                        user_msg_id=user_msg_id,
+                        text=f"handoff failed: {exc}",
+                        notify=True,
+                        thread_id=thread_id,
+                    )
+                    return
+
+                if final_event is not None and not final_event.ok:
+                    error_text = final_event.error or "unknown error"
+                    logger.error("handoff.phase1_failed", error=error_text)
+                    await send_plain(
+                        cfg.exec_cfg.transport,
+                        chat_id=chat_id,
+                        user_msg_id=user_msg_id,
+                        text=f"handoff failed: {error_text}",
+                        notify=True,
+                        thread_id=thread_id,
+                    )
+                    return
+
+                summary = (final_event.answer if final_event else "") or ""
+                if not summary.strip():
+                    logger.error("handoff.phase1_empty_answer")
+                    await send_plain(
+                        cfg.exec_cfg.transport,
+                        chat_id=chat_id,
+                        user_msg_id=user_msg_id,
+                        text="handoff failed: summary was empty.",
+                        notify=True,
+                        thread_id=thread_id,
+                    )
+                    return
+
+                # --- Phase 2: seed a NEW session with the summary ---
+                seed_prompt = handoff_seed_prompt(summary)
+                await send_plain(
+                    cfg.exec_cfg.transport,
+                    chat_id=chat_id,
+                    user_msg_id=user_msg_id,
+                    text=f"creating handoff summary for {job.resume_token.engine} session…",
+                    notify=False,
+                    thread_id=thread_id,
+                )
+                try:
+                    await run_job(
+                        chat_id,
+                        user_msg_id,
+                        seed_prompt,
+                        None,  # resume_token=None -> NEW session
+                        None,  # context
+                        thread_id,
+                        job.session_key,
+                        None,
+                        scheduler.note_thread_known,
+                        job.resume_token.engine,  # engine_override -> same engine
+                        None,
+                        (),
+                        False,
+                        None,
+                    )
+                except (RuntimeError, OSError, ValueError) as exc:
+                    logger.error("handoff.phase2_failed", error=str(exc))
+                    await send_plain(
+                        cfg.exec_cfg.transport,
+                        chat_id=chat_id,
+                        user_msg_id=user_msg_id,
+                        text=f"handoff failed to start new session: {exc}",
+                        notify=True,
+                        thread_id=thread_id,
+                    )
+                    return
+
+                # --- Completion message + truncated summary echo (D2) ---
+                completion = (
+                    f"handoff complete — new {job.resume_token.engine} session "
+                    f"started with the summary.\n"
+                    "Send your next message to continue. "
+                    "Do not reply to pre-handoff messages; "
+                    "they still point to the old session."
+                )
+                await send_plain(
+                    cfg.exec_cfg.transport,
+                    chat_id=chat_id,
+                    user_msg_id=user_msg_id,
+                    text=completion,
+                    notify=True,
+                    thread_id=thread_id,
+                )
+
+                # Echo the summary (truncated for display; full prompt already sent).
+                parts = MarkdownParts(header="handoff summary", body=summary)
+                for rendered_text, entities in prepare_telegram_multi(
+                    parts, max_body_chars=MAX_BODY_CHARS
+                ):
+                    await cfg.exec_cfg.transport.send(
+                        channel_id=chat_id,
+                        message=RenderedMessage(
+                            text=rendered_text, extra={"entities": entities}
+                        ),
+                        options=SendOptions(
+                            reply_to=MessageRef(
+                                channel_id=chat_id, message_id=user_msg_id
+                            ),
+                            notify=False,
+                            thread_id=thread_id,
+                        ),
+                    )
+
             async def run_thread_job(job: ThreadJob) -> None:
                 if job.kind == "compact":
                     await run_compact_job(job)
+                    return
+                if job.kind == "handoff":
+                    await run_handoff_job(job)
                     return
                 await run_job(
                     cast(int, job.chat_id),
@@ -2613,21 +2756,25 @@ async def run_main_loop(
                         )
                     elif update.data == COMPACT_CONFIRM_CALLBACK_DATA:
                         tg.start_soon(
-                            handle_compact_confirm,
-                            cfg,
-                            update,
-                            state,
-                            scheduler,
-                            confirmed=True,
+                            partial(
+                                handle_compact_confirm,
+                                cfg,
+                                update,
+                                state,
+                                scheduler,
+                                confirmed=True,
+                            )
                         )
                     elif update.data == COMPACT_DECLINE_CALLBACK_DATA:
                         tg.start_soon(
-                            handle_compact_confirm,
-                            cfg,
-                            update,
-                            state,
-                            scheduler,
-                            confirmed=False,
+                            partial(
+                                handle_compact_confirm,
+                                cfg,
+                                update,
+                                state,
+                                scheduler,
+                                confirmed=False,
+                            )
                         )
                     elif update.data:
                         command_id, args_text = parse_callback_data(update.data)

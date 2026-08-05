@@ -27,7 +27,7 @@ class ThreadJob:
     progress_ref: MessageRef | None = None
     plan: bool = False
     goal: str | None = None
-    kind: Literal["prompt", "compact"] = "prompt"
+    kind: Literal["prompt", "compact", "handoff"] = "prompt"
     compact_instructions: str | None = None
 
 

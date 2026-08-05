@@ -19,6 +19,10 @@
 - `/compact` lifecycle feedback: the terminal `CompletedEvent` is now consumed and reported — success says "compaction completed." (true compaction) or "handoff summary finished." (handoff-only); failure says "compact failed: <error>".
 - omp and grok compact now use `HandoffCompactMixin` (handoff-summary prompt via `run()`) instead of the test-only ACP path. ACP compact (`AcpCompactMixin`, `FakeAcpTransport`) remains in the codebase for future subprocess-transport work.
 - `HandoffCompactMixin` shared mixin in `_compact_mixin.py` — used by agy, omp, and grok; replaces inline `compact_support()`/`compact()` implementations.
+- `/compact` handoff-as-new-session: engines without true compaction (handoff_only + none) now show an approval card (two buttons). On approve: (1) handoff summary produced in the OLD session, (2) NEW session seeded with the full summary via `handoff_seed_prompt`, (3) routing flips to the new session id automatically, (4) summary echoed to the user (truncated). Actual context reduction, honestly labeled.
+- `handoff_seed_prompt(summary)` in `compact.py`: seeds a new session with the full handoff summary and a "acknowledge briefly and wait" instruction.
+- `ThreadJob.kind` now includes `"handoff"` for the two-phase migration job.
+- Fixed pre-existing `tg.start_soon(confirmed=True)` kwargs bug in compact confirm/decline callback dispatch (now uses `functools.partial`).
 
 ### changes
 

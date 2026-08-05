@@ -58,7 +58,7 @@ COMPACT_DECLINE_CALLBACK_DATA = "takopi:compact:decline"
 COMPACT_CONFIRM_MARKUP = {
     "inline_keyboard": [
         [
-            {"text": "send anyway", "callback_data": COMPACT_CONFIRM_CALLBACK_DATA},
+            {"text": "approve handoff", "callback_data": COMPACT_CONFIRM_CALLBACK_DATA},
             {"text": "cancel", "callback_data": COMPACT_DECLINE_CALLBACK_DATA},
         ]
     ]

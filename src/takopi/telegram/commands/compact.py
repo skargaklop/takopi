@@ -142,13 +142,25 @@ async def handle_compact_command(
     runner = resolved.runner
     support = get_compact_support(runner)
 
-    if support.mode == "none":
-        # Notify + confirm flow: ask user whether to send as plain prompt.
+    # --- Approval gate for engines without true compaction ---
+    # handoff_only AND none both go through the approval gate (D1 approved).
+    # The flow: approve -> phase 1 (handoff summary in OLD session) ->
+    # phase 2 (seed NEW session with summary) -> routing flips.
+    if not support.true_compaction:
+        if support.mode == "none":
+            disclaimer = (
+                f"{resume_token.engine} does not support compaction at all.\n\n"
+            )
+        else:
+            disclaimer = f"{resume_token.engine} cannot compact natively.\n\n"
         text = (
-            f"{resume_token.engine} does not support native compaction.\n\n"
-            "The agent will receive a plain-text compaction request "
-            "as a regular prompt (not real context reduction).\n\n"
-            "Send anyway?"
+            f"{disclaimer}"
+            "Takopi will:\n"
+            "1. Ask the agent for a handoff summary,\n"
+            "2. Start a NEW session seeded with it,\n"
+            "3. Route future messages to the new session.\n\n"
+            "The old session stays available but is no longer default.\n\n"
+            "Approve handoff?"
         )
         ref = await send_plain(
             cfg.exec_cfg.transport,
@@ -161,7 +173,6 @@ async def handle_compact_command(
         )
         if ref is not None:
             confirm_key = (chat_id, ref.message_id)
-            # Supersede any prior pending confirm for this chat/thread.
             _supersede_pending(state, chat_id, msg.thread_id)
             state.pending_compact_confirms[confirm_key] = PendingCompactConfirm(
                 resume_token=resume_token,
@@ -172,6 +183,7 @@ async def handle_compact_command(
             )
         return
 
+    # --- True-compaction engines: immediate compact path ---
     final_instructions = instructions
     if final_instructions and not support.accepts_instructions:
         warning = warn_if_dropping_instructions(resume_token.engine, final_instructions)
@@ -197,11 +209,7 @@ async def handle_compact_command(
     )
     await scheduler.enqueue(job)
 
-    # Ack on enqueue — honest wording based on true_compaction.
-    if support.true_compaction:
-        ack = f"compacting {resume_token.engine} session…"
-    else:
-        ack = f"creating handoff summary for {resume_token.engine} session…"
+    ack = f"compacting {resume_token.engine} session…"
     await send_plain(
         cfg.exec_cfg.transport,
         chat_id=chat_id,
@@ -234,7 +242,6 @@ async def handle_compact_confirm_callback(
     confirmed: bool,
 ) -> None:
     """Handle the compact confirm/decline inline-button callback."""
-    from ...compact import handoff_prompt
     from ...markdown import MarkdownParts
     from ...scheduler import ThreadJob
     from ...transport import MessageRef, RenderedMessage
@@ -253,18 +260,17 @@ async def handle_compact_confirm_callback(
         return
 
     # Edit the confirmation message to clear buttons.
-    label = "sending compaction request…" if confirmed else "cancelled"
+    label = "approved — creating handoff summary…" if confirmed else "cancelled"
     rendered_text, entities = prepare_telegram(MarkdownParts(header=label))
     await cfg.exec_cfg.transport.edit(
         ref=MessageRef(channel_id=chat_id, message_id=message_id),
         message=RenderedMessage(text=rendered_text, extra={"entities": entities}),
     )
     if confirmed:
-        prompt_text = handoff_prompt(pending.instructions)
         job = ThreadJob(
             chat_id=chat_id,
             user_msg_id=pending.user_msg_id,
-            text=prompt_text,
+            text="[handoff]",
             resume_token=pending.resume_token,
             context=None,
             thread_id=pending.thread_id,
@@ -272,7 +278,8 @@ async def handle_compact_confirm_callback(
             progress_ref=None,
             plan=False,
             goal=None,
-            kind="prompt",
+            kind="handoff",
+            compact_instructions=pending.instructions,
         )
         await cfg.bot.answer_callback_query(q.callback_query_id, text="sending…")
         await scheduler.enqueue(job)

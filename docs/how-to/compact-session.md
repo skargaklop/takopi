@@ -56,28 +56,22 @@ Takopi sends `/compact [instructions]` as a normal prompt to the runner. The eng
 
 Takopi calls the OpenCode server's session compact endpoint directly (`POST /api/session/<id>/compact`), then waits for completion.
 
-### Handoff-only compaction (grok, omp, agy)
+### Handoff-as-new-session (grok, omp, agy, and engines without compaction)
 
-These engines do not have a verified true compact command. Instead, Takopi sends a handoff-summary prompt that asks the agent to summarize the session for continuation. This is **not real compaction** — the agent is told not to claim that compaction occurred.
+These engines do not have a verified native compact command. Instead of appending a summary to the same session (which grows context), Takopi performs a **handoff to a new session** — actual context reduction, honestly labeled:
 
-An ACP-based compact path exists in the codebase (`_acp.py`) but is test-only until a subprocess transport is implemented. When available, grok and omp may return to ACP-based true compaction.
+1. **Approval gate.** `/compact` shows a message explaining what will happen, with **approve handoff** and **cancel** buttons. Nothing runs until you approve.
+2. **Phase 1 — summary.** Takopi asks the agent in the OLD session to produce a handoff summary (goal, decisions, files, next steps).
+3. **Phase 2 — new session.** Takopi starts a NEW session seeded with the full summary and a "acknowledge briefly and wait" instruction. The new session ID replaces the old one in routing — future messages go to the new session automatically.
+4. **Completion.** A message confirms the handoff, and the summary is echoed (truncated for display). The old session stays available via its resume footer but is no longer the default.
 
-## When instructions are not supported
+**Important:** after a handoff, send **fresh messages** — do not reply to pre-handoff messages. Replies to old messages still route to the old session via their resume footer.
 
-If you pass instructions to an engine that doesn't accept them (e.g., `/compact keep tests` on codex), Takopi warns you and runs compact without the instructions.
+If phase 1 fails (error or empty summary), no new session is created and the old session remains active.
 
-## Engines without compaction support
-
-When the target engine does not support compaction (`mode == "none"`), Takopi shows a confirmation message with inline buttons:
-
-- **Send anyway**: sends a plain-text compaction request as a regular prompt (using the `handoff_prompt` builder). This is **not real context reduction** — the agent receives a summary request as a normal message.
-- **Cancel**: dismisses the request.
-
-The confirmation ensures you know that the agent will not perform native compaction.
+An ACP-based compact path exists in the codebase (`_acp.py`) but is test-only until a subprocess transport is implemented.
 
 Third-party runners can implement compaction by providing `compact_support()` and `compact()` methods. See the [plugin API reference](../reference/plugin-api.md#compaction) for details.
-
-Runners without compaction support are handled gracefully — Takopi reports that the engine does not support compact.
 
 ## Troubleshooting: nothing happens
 

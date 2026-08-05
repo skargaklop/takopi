@@ -83,6 +83,23 @@ Write a concise handoff summary for the next agent turn."""
     return base if text is None else f"{base}\n\nUser focus:\n{text}"
 
 
+def handoff_seed_prompt(summary: str) -> str:
+    """Build the seed prompt that starts a NEW session with a handoff summary.
+
+    The full summary is embedded verbatim (never truncated). The new agent
+    is asked to acknowledge briefly and wait for the user.
+    """
+    return (
+        "You are continuing work from a previous session. "
+        "The handoff summary below is your memory of that work. "
+        "Reply with a one-line acknowledgement and wait "
+        "for the user's next instruction.\n\n"
+        "--- handoff summary ---\n"
+        f"{summary}\n"
+        "--- end summary ---"
+    )
+
+
 def warn_if_dropping_instructions(
     engine: EngineId, instructions: str | None
 ) -> str | None:

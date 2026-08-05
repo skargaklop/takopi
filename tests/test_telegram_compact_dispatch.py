@@ -22,10 +22,10 @@ from takopi.markdown import MarkdownPresenter
 from takopi.model import CompletedEvent, EngineId, ResumeToken, TakopiEvent
 from takopi.router import AutoRouter, RunnerEntry
 from takopi.runner_bridge import ExecBridgeConfig
-from takopi.runners.mock import Return, ScriptRunner
+from takopi.runners.mock import Raise, Return, ScriptRunner
 from takopi.telegram.bridge import TelegramBridgeConfig, run_main_loop
 from takopi.telegram.client import BotClient
-from takopi.telegram.types import TelegramIncomingMessage
+from takopi.telegram.types import TelegramCallbackQuery, TelegramIncomingMessage
 from takopi.transport import MessageRef, RenderedMessage, SendOptions
 from takopi.transport_runtime import TransportRuntime
 
@@ -224,6 +224,22 @@ def _msg(
     )
 
 
+def _cb(
+    *,
+    callback_data: str,
+    message_id: int = 1,
+    chat_id: int = 123,
+) -> TelegramCallbackQuery:
+    return TelegramCallbackQuery(
+        transport="telegram",
+        chat_id=chat_id,
+        message_id=message_id,
+        callback_query_id=f"cbq-{message_id}",
+        data=callback_data,
+        sender_id=123,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Test 1: /compact replying to a FINAL message with resume footer.
 # ---------------------------------------------------------------------------
@@ -411,17 +427,45 @@ async def test_compact_no_session_shows_guidance() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Test 8: Handoff runner — run() receives handoff_prompt, user gets ack + completion.
+# Test 8: Handoff engine /compact -> approval card with inline keyboard; nothing runs.
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.anyio
-async def test_compact_handoff_runner_delegates_to_run() -> None:
-    """A handoff_only runner's compact() delegates to run() with handoff_prompt."""
-    from takopi.compact import handoff_prompt
-
+async def test_handoff_engine_shows_approval_gate() -> None:
+    """handoff_only engine /compact shows approval card, does not run yet."""
     transport = FakeTransport()
     omp = HandoffScriptRunner([Return(answer="summary")], engine="omp")
+    cfg = _make_multi_cfg(transport, [omp])
+
+    async def poller(_cfg):
+        yield _msg(
+            "/compact",
+            message_id=10,
+            reply_to_message_id=5,
+            reply_to_text="done\n`omp resume s1`",
+        )
+
+    await run_main_loop(cfg, poller)
+    # No compact/run happened (approval gate stops it).
+    assert omp.calls == []
+    # An approval card with inline keyboard was sent.
+    approve_sends = [
+        s for s in transport.send_calls if "approve handoff" in str(s["message"].extra)
+    ]
+    assert approve_sends, "expected approval card with keyboard"
+
+
+# ---------------------------------------------------------------------------
+# Test 9: Approve -> phase 1 compact on OLD token; phase 2 seed run with resume=None.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio
+async def test_handoff_approve_runs_phase1_and_phase2() -> None:
+    """Approve: compact() called on OLD token, then run() called with resume=None."""
+    transport = FakeTransport()
+    omp = HandoffScriptRunner([Return(answer="the summary text")], engine="omp")
     cfg = _make_multi_cfg(transport, [omp])
 
     async def poller(_cfg):
@@ -431,74 +475,30 @@ async def test_compact_handoff_runner_delegates_to_run() -> None:
             reply_to_message_id=5,
             reply_to_text="done\n`omp resume s1`",
         )
+        # FakeTransport assigns message_id=1 to the first send (the approval card).
+        yield _cb(callback_data="takopi:compact:confirm", message_id=1)
 
     await run_main_loop(cfg, poller)
+    # Phase 1: compact() was called on the OLD token.
     assert len(omp.calls) >= 1
-    assert omp.calls[0][0] == handoff_prompt("keep decisions")
-    # User gets an ack message and a completion message.
-    texts = [s["message"].text.lower() for s in transport.send_calls]
-    assert any("handoff summary" in t for t in texts), texts
-    assert any("handoff summary finished" in t for t in texts), texts
+    assert omp.calls[0][0] is not None  # prompt is handoff_prompt text
+    # Phase 2: run() called with resume=None (new session) and seed prompt.
+    assert len(omp.calls) >= 2
+    phase2_prompt, phase2_resume = omp.calls[1]
+    assert phase2_resume is None  # new session
+    assert "handoff summary" in phase2_prompt.lower()
+    assert "the summary text" in phase2_prompt
 
 
 # ---------------------------------------------------------------------------
-# Test 9: compact() raises RuntimeError -> user-visible failure.
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.anyio
-async def test_compact_raises_shows_failure() -> None:
-    transport = FakeTransport()
-    codex = RaisingCompactRunner([Return(answer="ok")], engine=CODEX)
-    cfg = _make_multi_cfg(transport, [codex])
-
-    async def poller(_cfg):
-        yield _msg(
-            "/compact",
-            message_id=10,
-            reply_to_message_id=5,
-            reply_to_text="done\n`codex resume c1`",
-        )
-
-    await run_main_loop(cfg, poller)
-    texts = [s["message"].text.lower() for s in transport.send_calls]
-    assert any("compact failed" in t for t in texts), texts
-
-
-# ---------------------------------------------------------------------------
-# Test 10: compact() yields CompletedEvent(ok=False) -> user-visible failure.
+# Test 10: Decline -> nothing runs, cancelled reply.
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.anyio
-async def test_compact_silent_failure_shows_failure() -> None:
-    """Covers the ACP-shaped failure mode where compact() catches and yields ok=False."""
+async def test_handoff_decline_does_nothing() -> None:
     transport = FakeTransport()
-    codex = SilentFailCompactRunner([Return(answer="ok")], engine=CODEX)
-    cfg = _make_multi_cfg(transport, [codex])
-
-    async def poller(_cfg):
-        yield _msg(
-            "/compact",
-            message_id=10,
-            reply_to_message_id=5,
-            reply_to_text="done\n`codex resume c1`",
-        )
-
-    await run_main_loop(cfg, poller)
-    texts = [s["message"].text.lower() for s in transport.send_calls]
-    assert any("compact failed" in t for t in texts), texts
-
-
-# ---------------------------------------------------------------------------
-# Test 11: Success with true_compaction=False -> honest "handoff summary finished."
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.anyio
-async def test_compact_handoff_success_says_handoff() -> None:
-    transport = FakeTransport()
-    omp = HandoffScriptRunner([Return(answer="ok")], engine="omp")
+    omp = HandoffScriptRunner([Return(answer="summary")], engine="omp")
     cfg = _make_multi_cfg(transport, [omp])
 
     async def poller(_cfg):
@@ -508,8 +508,177 @@ async def test_compact_handoff_success_says_handoff() -> None:
             reply_to_message_id=5,
             reply_to_text="done\n`omp resume s1`",
         )
+        yield _cb(callback_data="takopi:compact:decline", message_id=1)
+
+    await run_main_loop(cfg, poller)
+    assert omp.calls == []
+    # "cancelled" appears in the edited confirmation message.
+    edit_texts = [s["message"].text.lower() for s in transport.edit_calls]
+    assert any("cancelled" in t for t in edit_texts), edit_texts
+
+
+# ---------------------------------------------------------------------------
+# Test 11: Phase 1 failure -> no phase 2; failure reply.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio
+async def test_handoff_phase1_failure_no_phase2() -> None:
+    transport = FakeTransport()
+    omp = HandoffScriptRunner([Raise(error=RuntimeError("phase1 boom"))], engine="omp")
+    cfg = _make_multi_cfg(transport, [omp])
+
+    async def poller(_cfg):
+        yield _msg(
+            "/compact",
+            message_id=10,
+            reply_to_message_id=5,
+            reply_to_text="done\n`omp resume s1`",
+        )
+        yield _cb(callback_data="takopi:compact:confirm", message_id=1)
+
+    await run_main_loop(cfg, poller)
+    # Phase 1 failed: only one compact call, no phase 2.
+    assert len(omp.calls) == 1
+    texts = [s["message"].text.lower() for s in transport.send_calls]
+    assert any("handoff failed" in t for t in texts), texts
+
+
+# ---------------------------------------------------------------------------
+# Test 12: Empty answer -> treated as failure (no phase 2).
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio
+async def test_handoff_empty_answer_no_phase2() -> None:
+    transport = FakeTransport()
+    omp = HandoffScriptRunner([Return(answer="   ")], engine="omp")
+    cfg = _make_multi_cfg(transport, [omp])
+
+    async def poller(_cfg):
+        yield _msg(
+            "/compact",
+            message_id=10,
+            reply_to_message_id=5,
+            reply_to_text="done\n`omp resume s1`",
+        )
+        yield _cb(callback_data="takopi:compact:confirm", message_id=1)
+
+    await run_main_loop(cfg, poller)
+    assert len(omp.calls) == 1  # phase 1 only, no phase 2
+    texts = [s["message"].text.lower() for s in transport.send_calls]
+    assert any("handoff failed" in t for t in texts), texts
+
+
+# ---------------------------------------------------------------------------
+# Test 13: True-compaction engine -> NO approval gate; immediate compact.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio
+async def test_true_compaction_no_approval_gate() -> None:
+    """Slash-prompt engine runs compact immediately, no approval card."""
+    transport = FakeTransport()
+    codex = CompactableScriptRunner([Return(answer="ok")], engine=CODEX)
+    cfg = _make_multi_cfg(transport, [codex])
+
+    async def poller(_cfg):
+        yield _msg(
+            "/compact",
+            message_id=10,
+            reply_to_message_id=5,
+            reply_to_text="done\n`codex resume c1`",
+        )
+
+    await run_main_loop(cfg, poller)
+    assert len(codex.compact_calls) == 1
+    # No approval card with keyboard.
+    assert not any(
+        "approve handoff" in str(s["message"].extra) for s in transport.send_calls
+    )
+
+
+# ---------------------------------------------------------------------------
+# Test 14: Instructions forwarded through approval -> handoff_prompt.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio
+async def test_handoff_instructions_forwarded() -> None:
+    """/compact keep tests -> compact() receives the instruction text."""
+    from takopi.compact import handoff_prompt
+
+    transport = FakeTransport()
+    omp = HandoffScriptRunner([Return(answer="summary")], engine="omp")
+    cfg = _make_multi_cfg(transport, [omp])
+
+    async def poller(_cfg):
+        yield _msg(
+            "/compact keep tests",
+            message_id=10,
+            reply_to_message_id=5,
+            reply_to_text="done\n`omp resume s1`",
+        )
+        yield _cb(callback_data="takopi:compact:confirm", message_id=1)
+
+    await run_main_loop(cfg, poller)
+    assert len(omp.calls) >= 1
+    # Phase 1 prompt is the handoff_prompt with instructions.
+    assert omp.calls[0][0] == handoff_prompt("keep tests")
+
+
+# ---------------------------------------------------------------------------
+# Test 15: None engine -> approval card with disclaimer; approve -> handoff flow.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio
+async def test_none_engine_approval_includes_disclaimer() -> None:
+    transport = FakeTransport()
+    codex = ScriptRunner([Return(answer="summary")], engine=CODEX)
+    cfg = _make_multi_cfg(transport, [codex])
+
+    async def poller(_cfg):
+        yield _msg(
+            "/compact",
+            message_id=10,
+            reply_to_message_id=5,
+            reply_to_text="done\n`codex resume c1`",
+        )
 
     await run_main_loop(cfg, poller)
     texts = [s["message"].text.lower() for s in transport.send_calls]
-    assert any("handoff summary finished" in t for t in texts), texts
-    assert not any("compaction completed" in t for t in texts), texts
+    assert any("does not support compaction at all" in t for t in texts), texts
+    assert any(
+        "approve handoff" in str(s["message"].extra) for s in transport.send_calls
+    )
+
+
+# ---------------------------------------------------------------------------
+# Test 16: Completion message mentions new session + summary echo.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio
+async def test_handoff_completion_mentions_new_session_and_echoes_summary() -> None:
+    transport = FakeTransport()
+    omp = HandoffScriptRunner([Return(answer="my cool summary")], engine="omp")
+    cfg = _make_multi_cfg(transport, [omp])
+
+    async def poller(_cfg):
+        yield _msg(
+            "/compact",
+            message_id=10,
+            reply_to_message_id=5,
+            reply_to_text="done\n`omp resume s1`",
+        )
+        yield _cb(callback_data="takopi:compact:confirm", message_id=1)
+
+    await run_main_loop(cfg, poller)
+    texts = [s["message"].text.lower() for s in transport.send_calls]
+    # Completion message mentions new session.
+    assert any("new omp session" in t for t in texts), texts
+    # Summary echo was sent.
+    assert any("my cool summary" in s["message"].text for s in transport.send_calls), [
+        s["message"].text for s in transport.send_calls
+    ]

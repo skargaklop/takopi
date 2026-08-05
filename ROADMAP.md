@@ -19,7 +19,7 @@ The `/compact` slash command does not yet work in all message contexts:
    - Ask the user whether to send the prompt as a plain text compaction request to the agent anyway (i.e., pass the raw compaction prompt through the normal `run()` path, letting the agent handle it as a regular prompt).
    - Only proceed after explicit user confirmation.
 4. No silent compact jobs: every `/compact` invocation must produce user-visible lifecycle feedback - an acknowledgement on acceptance, a completion notice (honest per mode: real compaction vs handoff summary), and a failure reply when `compact()` raises OR yields a non-ok `CompletedEvent`. Discarding runner events in `run_compact_job` is forbidden.
-5. `omp` and `grok` must not declare `mode="acp"` / `true_compaction=True` until a production ACP transport exists and harness-side interception of `/compact` is proven (Task 6). Reclassify them as `handoff_only` (delegate `compact()` to `run(handoff_prompt(instructions))`, same as `agy`) so `/compact` works honestly through the normal session path.
+5. `omp` and `grok` are `handoff_only`. `/compact` on any engine without true compaction (handoff_only or none) shows an approval card (two buttons); on approve, Takopi produces a handoff summary in the OLD session, seeds a NEW session with it, and reroutes future messages to the new session id (actual context reduction, honestly labeled). The summary is echoed to the user (truncated). A `/handoff` command (Task 7) will offer the same migration on true-compaction engines.
 6. Deployment verification is part of done: after any rebuild, verify the installed artifact (grep the uv-tools `site-packages` for the new symbols, check file dates) and verify exactly one takopi instance is running. Live evidence 2026-08-04: the bridge kept executing a 2026-08-02 build while believed rebuilt.
 
 ### Scope
@@ -212,6 +212,47 @@ The `acp` compact mode introduced in `f23baba` is a test-only stub: the only tra
 - `src/takopi/runners/omp.py`, `grok.py` - `create_acp_client` overrides, support re-declaration
 - `tests/test_acp_client.py`, `tests/test_acp_compact_runners.py`
 - `docs/reference/runners/omp/`, `docs/reference/runners/grok/`
+---
+
+## Task 7: `/handoff` Command for All Engines
+
+### Problem
+
+The handoff-as-new-session flow (Task 1, plan `docs/plans/2026-08-04-compact-handoff-new-session.md`, decisions D1/D2 approved) is only reachable via `/compact` on engines WITHOUT native compaction. Users have no way to trigger the same summary + new-session migration on engines that DO compact natively - e.g. when they want a clean session break with a fresh context instead of in-place compaction.
+
+### Requirements
+
+1. New built-in `/handoff` slash command available for EVERY engine (codex, claude, opencode, pi, omp, grok, agy, and plugin runners incl. `CompactSupport.none`).
+2. `/handoff` executes the identical flow as `/compact` on no-compaction engines:
+   - explicit user approval via two inline buttons before anything runs;
+   - handoff summary produced in the old session (instructions supported: `/handoff keep the test plan`);
+   - NEW session seeded with the FULL summary (new session id);
+   - routing flips to the new session; truncated summary echo to the user.
+3. Reply-context and ordering parity with `/compact`: works as a reply to any session message and in any position relative to engine selectors (`/handoff /codex` and `/codex /handoff` both resolve).
+4. No resolved session -> guidance reply (same as `/compact`).
+5. DRY: one shared migration executor used by both commands. The only differences are the entry command and that `/handoff` ignores `compact_support()` entirely (applies even to true-compaction engines).
+6. Command contract clarity (document in `commands-and-directives.md`):
+   - `/compact` = reduce context: native in-place compaction when supported, handoff-migration (with approval) otherwise.
+   - `/handoff` = always: approval -> summary -> new session, for every engine.
+
+### Dependencies
+
+- Task 1 handoff-as-new-session implementation (approved plan above) must land first; this task adds the `/handoff` entry point on top of the shared executor.
+
+### Investigation Steps
+
+1. No new research expected; reuse the verified mechanics from the Task 1 handoff plan.
+2. Write an implementation plan (`.md` in `docs/plans/`) covering the `/handoff` entry point and shared-executor refactor.
+3. Execute via subagent with TDD.
+
+### Scope
+
+- `src/takopi/telegram/commands/parse.py` - recognize `handoff` as a leading command token (with selector ordering parity)
+- `src/takopi/telegram/commands/compact.py` (or a new shared `handoff.py`) - entry point + shared migration executor
+- `src/takopi/telegram/commands/meta_args.py`, `menu.py` - register pure-meta command + bot menu entry
+- `src/takopi/telegram/prompt_batch.py` - add `handoff` to `CONTROL_COMMANDS`
+- `tests/test_telegram_handoff_command.py` (or extend the compact dispatch tests)
+- `docs/how-to/compact-session.md`, `docs/reference/commands-and-directives.md`, `changelog.md`
 ---
 
 ## Workflow Convention
