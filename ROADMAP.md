@@ -368,6 +368,41 @@ Live report 2026-08-05: the FINAL grok message dumps the entire reasoning/narrat
 - `changelog.md`
 ---
 
+## Task 11: Grok Stream Protocol Completion (DONE)
+
+### Problem
+
+Live evidence 2026-08-05: every grok run logs `jsonl.msgspec.invalid` warnings for `available_commands`, `usage`, `tool_call`, `tool_call_update` (`Invalid value ... at $.type`); the events are dropped, so tool calls never become actions - a 22m run showed "step 3". Mid-run usage telemetry is lost. Separately, a run ended with `grok run stopped (cancelled)` after 48s without a user cancel - cause unclassified (takopi-side, CLI-internal, or upstream API). Root cause: `schemas/grok.py` models only 4 of the ~8 emitted event types.
+
+### Requirements
+
+1. Schema-complete decoding: `tool_call`, `tool_call_update`, `usage`, `available_commands` decode into typed structs (field shapes from a real capture, `forbid_unknown_fields=False`).
+2. Tool calls become real actions (started/completed, kind/title via the shared `tool_actions.py` helpers); progress steps reflect actual tool activity; duplicate starts for the same id are forbidden.
+3. Mid-run `usage` events merge into the terminal `CompletedEvent.usage` (end-event usage wins).
+4. Forward compatibility: unknown future event types are skipped at DEBUG level - no warning spam; only genuinely malformed JSON warns.
+5. Cancellation: classify the `stopReason=cancelled` cause (takopi-side vs CLI-internal vs upstream API), fix if takopi-side (pinned by a test), otherwise document + honest user-facing reason.
+6. No regressions to Task 9 (coalescing) and Task 10 (narration split) behaviors.
+
+### Plan
+
+- `docs/plans/2026-08-05-grok-stream-protocol-completion.md` - approved spec.
+
+### Scope
+
+- `src/takopi/schemas/grok.py` - 4 new event structs + unknown-type catch-all
+- `src/takopi/runners/grok.py` - tool action mapping, usage merge, DEBUG demotion
+- `tests/test_grok_schema.py`, `tests/test_grok_runner.py`
+- `docs/reference/runners/grok/stream-sample-agentic.jsonl` - full-fidelity capture + cancellation analysis
+- `changelog.md`
+---
+
+### Post-implementation notes
+
+- **A0 capture:** `docs/reference/runners/grok/stream-sample-tools.jsonl` (79 lines, trimmed from a 632-line live run). Captured event shapes: `tool_call` (`toolCallId`, `toolName`, `kind`, `status`, `rawInput`), `tool_call_update` (`toolCallId`, `status`, `content`, `rawOutput`), `usage` (`usage` dict), `available_commands` (`tools`, `commands`).
+- **Cancellation (requirement 5):** The capture did not reproduce a `stopReason=cancelled` end event. The existing mapping (`stop not in {"error","aborted","cancelled","canceled"}` → `ok=False`) already produces an honest user-facing message (`grok run stopped (cancelled)`). Without a reproducible capture, the cause is most likely CLI-internal (the grok harness cancelling after a timeout or upstream API error), not takopi-side. No code change needed; behavior pinned by `test_cancel_stop_reason_maps_to_error`.
+- **Forward compat (requirement 4):** `decode_event` peeks the `type` field before decoding. Known types go through the tagged-union decoder; unknown types return `StreamUnknownEvent(type_name=...)` — no `ValidationError`, no WARNING. Only genuinely malformed JSON reaches `decode_error_events` and logs a WARNING.
+- **Tool-kind mapping:** Grok provides its own `kind`/`title` fields on `tool_call` (e.g. `kind="list"`, `title="list_dir"`), but these don't map to takopi's `ActionKind` literal. The shared `tool_kind_and_title` helper is used instead for consistency with the claude runner. Unrecognized grok tool names (e.g. `list_dir`, `read_file`) fall through to generic `("tool", <toolName>)`.
+
 ## Workflow Convention
 
 All non-trivial tasks in this roadmap follow this sequence:

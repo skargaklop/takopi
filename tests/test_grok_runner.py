@@ -554,3 +554,172 @@ def test_narration_split_math_sample_unchanged() -> None:
     completed = [e for e in events if isinstance(e, CompletedEvent)][0]
     assert "**391**." in completed.answer
     assert completed.ok is True
+
+
+# ---------------------------------------------------------------------------
+# Task 11: tool_call / tool_call_update / usage / available_commands mapping
+# ---------------------------------------------------------------------------
+
+
+def test_tool_call_emits_action_started() -> None:
+    """Task A.3: tool_call -> action_started with kind/title from shared helper."""
+    events, state = _run_events(
+        [
+            b'{"type":"tool_call","toolCallId":"call-1","toolName":"list_dir",'
+            b'"status":"pending","rawInput":{"target_directory":"."}}',
+            b'{"type":"end","stopReason":"EndTurn","sessionId":"dddddddd-dddd-dddd-dddd-dddddddddddd"}',
+        ]
+    )
+    started = [e for e in events if isinstance(e, ActionEvent) and e.phase == "started"]
+    assert len(started) == 1
+    assert started[0].action.id == "call-1"
+    # Shared helper maps list_dir -> kind "tool" (unrecognized tool name).
+    assert started[0].action.kind == "tool"
+    assert "list_dir" in started[0].action.title
+
+
+def test_tool_call_bash_emits_command_kind() -> None:
+    """Bash tool_call -> kind 'command' with relativized command."""
+    events, state = _run_events(
+        [
+            b'{"type":"tool_call","toolCallId":"call-bash","toolName":"bash",'
+            b'"rawInput":{"command":"ls -la"}}',
+            b'{"type":"end","stopReason":"EndTurn","sessionId":"dddddddd-dddd-dddd-dddd-dddddddddddd"}',
+        ]
+    )
+    started = [e for e in events if isinstance(e, ActionEvent) and e.phase == "started"]
+    assert len(started) == 1
+    assert started[0].action.kind == "command"
+    assert "ls" in started[0].action.title
+
+
+def test_tool_call_update_completed_completes_action() -> None:
+    """Task A.4: tool_call_update (same id, completed) -> action_completed."""
+    events, state = _run_events(
+        [
+            b'{"type":"tool_call","toolCallId":"call-1","toolName":"read_file",'
+            b'"rawInput":{"target_file":"foo.txt"}}',
+            b'{"type":"tool_call_update","toolCallId":"call-1","status":"completed"}',
+            b'{"type":"end","stopReason":"EndTurn","sessionId":"dddddddd-dddd-dddd-dddd-dddddddddddd"}',
+        ]
+    )
+    completed = [
+        e for e in events if isinstance(e, ActionEvent) and e.phase == "completed"
+    ]
+    assert len(completed) == 1
+    assert completed[0].action.id == "call-1"
+    assert completed[0].ok is True
+
+
+def test_tool_call_update_no_duplicate_starts() -> None:
+    """Risks: duplicate tool_call for same id must not create a second start."""
+    events, state = _run_events(
+        [
+            b'{"type":"tool_call","toolCallId":"call-1","toolName":"read_file",'
+            b'"rawInput":{"target_file":"foo.txt"}}',
+            b'{"type":"tool_call","toolCallId":"call-1","toolName":"read_file",'
+            b'"rawInput":{"target_file":"foo.txt"}}',
+            b'{"type":"end","stopReason":"EndTurn","sessionId":"dddddddd-dddd-dddd-dddd-dddddddddddd"}',
+        ]
+    )
+    started = [e for e in events if isinstance(e, ActionEvent) and e.phase == "started"]
+    assert len(started) == 1
+
+
+def test_usage_event_merged_into_completed() -> None:
+    """Task A.5: mid-stream usage event -> merged into terminal CompletedEvent.usage."""
+    events, state = _run_events(
+        [
+            b'{"type":"usage","usage":{"input_tokens":100,"output_tokens":5}}',
+            b'{"type":"end","stopReason":"EndTurn","sessionId":"dddddddd-dddd-dddd-dddd-dddddddddddd"}',
+        ]
+    )
+    completed = [e for e in events if isinstance(e, CompletedEvent)][0]
+    # Mid-stream usage is present in the merged payload.
+    assert completed.usage is not None
+    mid_usage = completed.usage.get("mid_stream_usage")
+    assert mid_usage == {"input_tokens": 100, "output_tokens": 5}
+
+
+def test_usage_end_event_takes_precedence() -> None:
+    """End-event usage wins on conflict over mid-stream usage."""
+    events, state = _run_events(
+        [
+            b'{"type":"usage","usage":{"input_tokens":100,"output_tokens":5}}',
+            b'{"type":"end","stopReason":"EndTurn","sessionId":"dddddddd-dddd-dddd-dddd-dddddddddddd",'
+            b'"usage":{"input_tokens":999,"output_tokens":42}}',
+        ]
+    )
+    completed = [e for e in events if isinstance(e, CompletedEvent)][0]
+    assert completed.usage is not None
+    # End-event usage is the top-level "usage" key.
+    assert completed.usage["usage"]["input_tokens"] == 999
+    # Mid-stream usage preserved separately but doesn't override end usage.
+    assert completed.usage["mid_stream_usage"]["input_tokens"] == 100
+
+
+def test_available_commands_no_action_no_warning() -> None:
+    """Task A.6: available_commands -> no action, no events."""
+    events, state = _run_events(
+        [
+            b'{"type":"available_commands","tools":["bash"],"commands":[]}',
+            b'{"type":"end","stopReason":"EndTurn","sessionId":"dddddddd-dddd-dddd-dddd-dddddddddddd"}',
+        ]
+    )
+    actions = [e for e in events if isinstance(e, ActionEvent)]
+    assert len(actions) == 0
+
+
+def test_unknown_type_no_action_no_warning() -> None:
+    """Forward-compat: unknown type -> no action, no events (tolerated)."""
+    events, state = _run_events(
+        [
+            b'{"type":"mystery","data":"future"}',
+            b'{"type":"end","stopReason":"EndTurn","sessionId":"dddddddd-dddd-dddd-dddd-dddddddddddd"}',
+        ]
+    )
+    actions = [e for e in events if isinstance(e, ActionEvent)]
+    assert len(actions) == 0
+
+
+def test_cancel_stop_reason_maps_to_error() -> None:
+    """Task A.8: stopReason=cancelled -> CompletedEvent(ok=False)."""
+    events, state = _run_events(
+        [
+            b'{"type":"end","stopReason":"cancelled","sessionId":"dddddddd-dddd-dddd-dddd-dddddddddddd"}',
+        ]
+    )
+    completed = [e for e in events if isinstance(e, CompletedEvent)][0]
+    assert completed.ok is False
+    assert "cancelled" in (completed.error or "")
+
+
+def test_tool_sample_end_to_end() -> None:
+    """Replay stream-sample-tools.jsonl: tool actions present, zero decode errors."""
+    events, state = _run_events(
+        [
+            line
+            for line in (
+                Path(__file__)
+                .parent.parent.joinpath(
+                    "docs", "reference", "runners", "grok", "stream-sample-tools.jsonl"
+                )
+                .read_bytes()
+                .splitlines()
+            )
+            if line.strip()
+        ],
+        session_id="c308f091-88a1-4bbb-9bd9-3c4c2f9a60a5",
+    )
+    completed = [e for e in events if isinstance(e, CompletedEvent)]
+    assert len(completed) == 1
+    assert completed[0].ok is True
+    # Two tool calls (list_dir + read_file) -> at least 2 started + 2 completed actions.
+    started = [e for e in events if isinstance(e, ActionEvent) and e.phase == "started"]
+    completed_actions = [
+        e for e in events if isinstance(e, ActionEvent) and e.phase == "completed"
+    ]
+    assert len(started) >= 2
+    assert len(completed_actions) >= 2
+    # Usage telemetry present.
+    assert completed[0].usage is not None

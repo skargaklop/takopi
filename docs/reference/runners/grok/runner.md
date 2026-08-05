@@ -13,7 +13,6 @@ grok -p <prompt> --output-format streaming-json [--yolo] [-m <model>] [--session
 ### Non-goals (v1)
 
 - ACP / `grok agent stdio` long-lived JSON-RPC
-- Full tool-call `ActionEvent` fidelity (headless streaming-json documents `text`, `thought`, `end`, `error` only)
 
 ## Resume UX
 
@@ -41,9 +40,13 @@ See [Config reference — grok](../../config.md#grok).
 |-------------|----------------|
 | `text` | Accumulate into the current text segment (answer or narration) |
 | `thought` | Buffered, coalesced into one note `ActionEvent` per contiguous block (flushed by the next non-thought event); also closes the current text segment as narration |
+| `tool_call` | `action_started` via shared `tool_kind_and_title` (command/file/tool kind); duplicate starts for the same `toolCallId` are suppressed |
+| `tool_call_update` | `action_completed` (status `completed` → `ok=True`, `error` → `ok=False`) |
+| `usage` | Buffered as `mid_stream_usage`; merged into terminal `CompletedEvent.usage` (end-event usage takes precedence) |
+| `available_commands` | Ignored (no action, no warning) |
 | `end` | `CompletedEvent` with usage / sessionId; answer = trailing text run |
 | `error` | `CompletedEvent(ok=False)`; answer = trailing text run |
-| other | Ignored (msgspec decode error dropped) |
+| other / unknown | `StreamUnknownEvent` catch-all — DEBUG log, no events, no warning spam (forward compatibility) |
 
 ### Answer/narration split
 
@@ -62,6 +65,8 @@ thought) is the answer and goes into `CompletedEvent.answer`.
 Single-turn Q&A runs (contiguous text, no thoughts interleaved) produce
 one text segment → answer = full text (backward compatible).
 
-See `stream-sample.jsonl` (math, single-turn) and
-`stream-sample-agentic.jsonl` (multi-turn with narration) for reference
+See `stream-sample.jsonl` (math, single-turn),
+`stream-sample-agentic.jsonl` (multi-turn with narration), and
+`stream-sample-tools.jsonl` (tool-heavy agentic run with `tool_call`,
+`tool_call_update`, `usage`, `available_commands`) for reference
 captures.

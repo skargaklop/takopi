@@ -20,6 +20,7 @@ from ._compact_mixin import HandoffCompactMixin
 from ..schemas import grok as grok_schema
 from .modes import effective_prompt, run_modes
 from .run_options import get_run_options
+from .tool_actions import tool_kind_and_title
 
 logger = get_logger(__name__)
 
@@ -47,6 +48,13 @@ class GrokStreamState:
     # becomes the answer; earlier segments become coalesced note actions.
     current_text: str = ""
     text_segments: list[str] = field(default_factory=list)
+    # Tool-call tracking: started action ids (prevents duplicate starts).
+    seen_tool_calls: set[str] = field(default_factory=set)
+    # Maps toolCallId -> (kind, title) from the original tool_call event,
+    # so tool_call_update can emit a completed event with the same kind/title.
+    tool_call_meta: dict[str, tuple[str, str]] = field(default_factory=dict)
+    # Mid-stream usage events (merged into terminal CompletedEvent; end wins).
+    mid_stream_usage: dict[str, Any] | None = None
 
 
 def _coerce_comma_list(value: Any) -> str | None:
@@ -149,6 +157,15 @@ def _flush_text_segments(state: GrokStreamState, out: list[TakopiEvent]) -> str:
     return answer
 
 
+# Path keys for grok tool inputs (field names observed in real CLI captures).
+_GROK_PATH_KEYS: tuple[str, ...] = (
+    "target_file",
+    "target_directory",
+    "file_path",
+    "path",
+)
+
+
 def translate_grok_event(
     event: grok_schema.GrokEvent,
     *,
@@ -167,6 +184,63 @@ def translate_grok_event(
             if data:
                 _flush_pending_thought(state, out)
                 state.current_text += data
+            return out
+
+        case grok_schema.StreamToolCallEvent():
+            # Flush any pending thoughts before the tool action.
+            _flush_pending_thought(state, out)
+            call_id = event.toolCallId
+            if call_id and call_id not in state.seen_tool_calls:
+                state.seen_tool_calls.add(call_id)
+                tool_name = str(event.toolName or event.title or "tool")
+                kind, action_title = tool_kind_and_title(
+                    tool_name, event.rawInput, path_keys=_GROK_PATH_KEYS
+                )
+                state.tool_call_meta[call_id] = (kind, action_title)
+                detail: dict[str, Any] = {"name": tool_name, "input": event.rawInput}
+                out.append(
+                    state.factory.action_started(
+                        action_id=call_id,
+                        kind=kind,
+                        title=action_title,
+                        detail=detail,
+                    )
+                )
+            return out
+
+        case grok_schema.StreamToolCallUpdateEvent():
+            _flush_pending_thought(state, out)
+            call_id = event.toolCallId
+            status = (event.status or "").lower()
+            ok = status != "error"
+            # Reuse kind/title from the original tool_call; fall back to generic.
+            kind_str, title_str = state.tool_call_meta.get(call_id, ("tool", call_id))
+            out.append(
+                state.factory.action_completed(
+                    action_id=call_id,
+                    kind=kind_str,
+                    title=title_str,
+                    ok=ok,
+                    detail={"status": event.status},
+                )
+            )
+            return out
+
+        case grok_schema.StreamUsageEvent():
+            _flush_pending_thought(state, out)
+            state.mid_stream_usage = event.usage
+            return out
+
+        case grok_schema.StreamAvailableCommandsEvent():
+            # No action needed; suppress.
+            return out
+
+        case grok_schema.StreamUnknownEvent():
+            # Forward-compat: unrecognized type, DEBUG only, no events.
+            logger.debug(
+                "grok.stream.unknown_type",
+                type_name=event.type_name,
+            )
             return out
 
         case grok_schema.StreamThoughtEvent(data=data):
@@ -189,6 +263,8 @@ def translate_grok_event(
             if session_id != state.resume.value:
                 state.resume = resume
             usage = _usage_payload(event)
+            if state.mid_stream_usage is not None:
+                usage["mid_stream_usage"] = state.mid_stream_usage
             stop = (event.stopReason or "").lower()
             ok = stop not in {"error", "aborted", "cancelled", "canceled"}
             error = None if ok else f"grok run stopped ({event.stopReason})"
@@ -210,6 +286,8 @@ def translate_grok_event(
             session_id = event.sessionId or state.resume.value
             resume = ResumeToken(engine=ENGINE, value=session_id)
             usage = _usage_payload(event)
+            if state.mid_stream_usage is not None:
+                usage["mid_stream_usage"] = state.mid_stream_usage
             message = event.message or "grok run failed"
             state.last_assistant_text = answer
             out.append(
