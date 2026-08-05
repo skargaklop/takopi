@@ -40,6 +40,7 @@ class GrokStreamState:
     last_assistant_text: str = ""
     started: bool = False
     note_seq: int = 0
+    pending_thought: list[str] = field(default_factory=list)
 
 
 def _coerce_comma_list(value: Any) -> str | None:
@@ -77,6 +78,31 @@ def _usage_payload(
     return usage
 
 
+def _flush_pending_thought(state: GrokStreamState, out: list[TakopiEvent]) -> None:
+    """Flush buffered thought chunks as ONE coalesced note action.
+
+    The grok CLI emits ``thought`` events at word/token granularity. Without
+    coalescing, each word becomes a separate progress step. This joins all
+    pending chunks into a single action before the triggering event.
+    """
+    if not state.pending_thought:
+        return
+    title = "".join(state.pending_thought)
+    state.pending_thought.clear()
+    if not title.strip():
+        return
+    state.note_seq += 1
+    out.append(
+        state.factory.action_completed(
+            action_id=f"grok.thought.{state.note_seq}",
+            kind="note",
+            title=title,
+            ok=True,
+            detail={},
+        )
+    )
+
+
 def translate_grok_event(
     event: grok_schema.GrokEvent,
     *,
@@ -93,24 +119,17 @@ def translate_grok_event(
     match event:
         case grok_schema.StreamTextEvent(data=data):
             if data:
+                _flush_pending_thought(state, out)
                 state.last_assistant_text += data
             return out
 
         case grok_schema.StreamThoughtEvent(data=data):
             if data:
-                state.note_seq += 1
-                out.append(
-                    state.factory.action_completed(
-                        action_id=f"grok.thought.{state.note_seq}",
-                        kind="note",
-                        title=data,
-                        ok=True,
-                        detail={},
-                    )
-                )
+                state.pending_thought.append(data)
             return out
 
         case grok_schema.StreamEndEvent():
+            _flush_pending_thought(state, out)
             session_id = event.sessionId or state.resume.value
             resume = ResumeToken(engine=ENGINE, value=session_id)
             # Keep factory resume aligned with the canonical token we started with
@@ -133,6 +152,7 @@ def translate_grok_event(
             return out
 
         case grok_schema.StreamErrorEvent():
+            _flush_pending_thought(state, out)
             session_id = event.sessionId or state.resume.value
             resume = ResumeToken(engine=ENGINE, value=session_id)
             usage = _usage_payload(event)
@@ -149,6 +169,7 @@ def translate_grok_event(
             return out
 
         case _:
+            _flush_pending_thought(state, out)
             return out
 
 
@@ -324,6 +345,7 @@ class GrokRunner(HandoffCompactMixin, ResumeTokenMixin, JsonlSubprocessRunner):
                 )
             )
             state.started = True
+        _flush_pending_thought(state, out)
         out.append(self.note_event(message, state=state, ok=False))
         out.append(
             state.factory.completed_error(
@@ -351,7 +373,8 @@ class GrokRunner(HandoffCompactMixin, ResumeTokenMixin, JsonlSubprocessRunner):
                     title=self.session_title,
                 )
             )
-            state.started = True
+        state.started = True
+        _flush_pending_thought(state, out)
         out.append(
             state.factory.completed_error(
                 error=message,

@@ -1,6 +1,8 @@
 # Takopi Roadmap
 
-## Task 1: Robust `/compact` Command Dispatch
+## Task 1: Robust `/compact` Command Dispatch (DONE)
+
+Completed 2026-08-04/05: dispatch robustness (`4669620`), production fixes + lifecycle feedback (`bca5e46`), handoff-as-new-session (`26ee9cb`), cross-engine extension (`9e20fd5`). Req 5 landed as the approve -> summarize -> NEW session flow (plan `docs/plans/2026-08-04-compact-handoff-new-session.md`), superseding the in-place same-session wording.
 
 ### Problem
 
@@ -146,7 +148,13 @@ For each new agent, follow this workflow:
 
 ---
 
-## Task 5: Clean Shutdown Without Asyncio Pipe-Transport Noise (Windows)
+## Task 5: Clean Shutdown Without Asyncio Pipe-Transport Noise (Windows) (DONE)
+
+Resolved by earlier shutdown/cleanup work (`c4e1817`, `fc3f7eb`, `42ccb1a`). User-verified 2026-08-05: Ctrl+C produces no noise. Not implemented as specced: req 3 (config-timeout key) and req 4 (noise-assertion regression test) - the symptom was eliminated without them; re-add only if the noise recurs. Caveat: if the Ctrl+C test was idle-time, re-verify mid-run while an agent subprocess is active.
+
+### Plan
+
+- `docs/plans/2026-08-05-shutdown-transport-close.md` - finish reqs 2-4 (transport-close helper, bounded timeout, noise regression test) + mid-run e2e.
 
 ### Problem
 
@@ -293,6 +301,45 @@ The handoff-as-new-session flow always creates the new session on the SAME engin
 - `src/takopi/telegram/loop.py` - phase 2 `engine_override`, completion wording
 - `tests/test_telegram_compact_dispatch.py`, parser test matrix
 - `docs/reference/commands-and-directives.md`, `docs/how-to/compact-session.md`, `changelog.md`
+---
+
+## Task 9: Grok Stream Coalescing (Per-Word Steps Bug) (DONE)
+
+### Problem
+
+Live report 2026-08-05: grok progress renders each WORD as a separate step and on its own line - "working - grok - 5m 35s - step 3517", progress lines like "v to", "v understand", "v spawn". Root cause (code-verified): `translate_grok_event` (`src/takopi/runners/grok.py:99-111`) maps EVERY `StreamThoughtEvent` to a completed `note` action; the grok CLI emits thought JSONL events at word/token granularity, so `action_count` (the `step N` header) explodes and every word prints on its own action line. Existing tests use idealized one-thought-per-event fixtures.
+
+### Requirements
+
+1. Consecutive thought deltas coalesce into ONE step/action per thought block (flush on non-thought event or stream end); step count reflects real actions, not words.
+2. No per-word lines in progress; thinking stays visible as coalesced note actions (renderer truncates as today).
+3. `StreamTextEvent` accumulation and final-answer content unchanged.
+4. Audit the pi runner (`note_event`, `pi.py:505`) for the same granularity pattern; fix if shared (DRY helper), document the finding either way.
+5. Regression tests built from a REAL captured grok JSONL sample (word-granularity, production-shaped), not idealized fixtures.
+6. Engine-local fix only: no renderer/progress changes, no new config knobs.
+
+### Investigation Steps
+
+1. Capture raw grok CLI JSONL (same args as `build_args()`) into `docs/reference/runners/grok/stream-sample.jsonl`; verify word-granularity at the CLI level and chunk spacing.
+2. Audit pi CLI note events the same way.
+3. Execute the approved plan via subagent (TDD).
+
+### Plan
+
+- `docs/plans/2026-08-05-grok-stream-coalescing.md` - approved spec (Option A: runner-side coalescing buffer).
+
+### Scope
+
+- `src/takopi/runners/grok.py` - pending-thought buffer + flush
+- (conditional) `src/takopi/runners/pi.py` or a shared helper module
+- `tests/test_grok_runner.py` ((conditional) `tests/test_pi_runner.py`)
+- `docs/reference/runners/grok/stream-sample.jsonl` - captured sample
+- `changelog.md`
+
+### Post-implementation notes
+
+- **Pi audit (requirement 4):** Pi's `note_event` (`pi.py:494-514`) is only used for error-path messages (`process_error_events`), NOT for streaming thoughts — pi does not map `StreamThoughtEvent` to actions the way grok does. No shared bug, no DRY helper needed. Pi is unaffected.
+- **Sample capture (requirement 5):** Captured real grok CLI JSONL at `docs/reference/runners/grok/stream-sample.jsonl` (374 lines, word-granularity `thought` events). Confirmed thoughts precede text events; join strategy `"".join(chunks)` preserves embedded spaces.
 ---
 
 ## Workflow Convention

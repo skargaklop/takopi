@@ -36,6 +36,7 @@
 - replying to a prior run's message now carries that run's engine forward for routing and stored-session lookups (previously only an explicit `/engine resume <id>` did, so replying to a non-default-engine run could start the default engine instead).
 - outbound file delivery (`[[takopi-send: ...]]`) now accepts absolute paths that resolve inside the project root, not just project-relative paths. Paths escaping the root are still rejected.
 - graceful shutdown on Ctrl+C: SIGINT now cooperatively cancels the event loop instead of tearing it down, so subprocesses are terminated and the HTTP connection pool is closed cleanly (eliminates `unclosed transport` / `ValueError: I/O operation on closed pipe` warnings on exit).
+- grok progress no longer renders each **word** as a separate step: the grok CLI emits `thought` events at word/token granularity, and each was mapped to its own `ActionEvent` (step 1, step 2, … step 3517). Runner-side coalescing now buffers consecutive `thought` chunks and flushes them as a single note action when a non-thought event (text/end/error) arrives. No timers, no background tasks — purely event-driven. Existing renderer truncation caps the title.
 
 ## v0.26.0 (2026-07-18)
 

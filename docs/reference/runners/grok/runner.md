@@ -40,7 +40,7 @@ See [Config reference — grok](../../config.md#grok).
 | Grok `type` | Takopi mapping |
 |-------------|----------------|
 | `text` | Accumulate into `CompletedEvent.answer` |
-| `thought` | Optional note `ActionEvent` |
+| `thought` | Buffered, coalesced into one note `ActionEvent` per contiguous block (flushed by the next non-thought event) |
 | `end` | `CompletedEvent` with usage / sessionId |
 | `error` | `CompletedEvent(ok=False)` |
 | other | Ignored (msgspec decode error dropped) |

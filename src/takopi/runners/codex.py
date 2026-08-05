@@ -27,6 +27,7 @@ from ..schemas import codex as codex_schema
 from ..utils.paths import get_run_base_dir, relativize_command
 from ..utils.streams import drain_stderr, iter_bytes_lines
 from ..utils.subprocess import (
+    close_process_streams,
     kill_process_tree,
     terminate_process,
     wait_for_process,
@@ -807,6 +808,9 @@ class _AppServerClient:
                     if timed_out:
                         await kill_process_tree(proc)
                         await proc.wait()
+        # Explicitly close the stdio pipe transports to prevent the proactor
+        # __del__ ResourceWarning / ValueError noise at teardown.
+        await close_process_streams(proc)
         # Only cancel stderr task — reader task may be the caller of stop().
         if self._stderr_task is not None and not self._stderr_task.done():
             self._stderr_task.cancel()

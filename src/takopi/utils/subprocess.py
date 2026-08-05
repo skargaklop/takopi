@@ -8,11 +8,18 @@ from contextlib import asynccontextmanager
 from typing import Any
 
 import anyio
+from anyio import BrokenResourceError, ClosedResourceError
 from anyio.abc import Process
 
 from ..logging import get_logger
 
 logger = get_logger(__name__)
+
+#: Default per-stream close timeout (seconds). Shutdown must never hang on
+#: a wedged pipe; each stream close is individually bounded by this value
+#: (or the ``close_timeout`` override). Configurable globally via
+#: ``RunnerSettings.shutdown_timeout_s``.
+DEFAULT_SHUTDOWN_TIMEOUT_S: float = 5.0
 
 
 async def wait_for_process(proc: Process, timeout: float) -> bool:
@@ -90,16 +97,70 @@ def _signal_process(
         return
 
 
+async def close_process_streams(
+    proc: Process, *, timeout: float = DEFAULT_SHUTDOWN_TIMEOUT_S
+) -> None:
+    """Explicitly close the stdio pipe transports of *proc*.
+
+    On Windows + ProactorEventLoop, asyncio pipe transports that are never
+    explicitly closed are GC'd at interpreter teardown; ``__del__`` issues a
+    ``ResourceWarning`` whose ``__repr__`` touches ``fileno()`` on a closed
+    pipe, producing the "Exception ignored … ValueError: I/O operation on
+    closed pipe" noise. This helper closes stdin first (it owns the write
+    transport), then stdout/stderr, so the transports are properly
+    disposed before teardown.
+
+    The function is:
+
+    - **Error-tolerant**: swallows ``OSError``, ``ValueError``,
+      ``ClosedResourceError``, and ``BrokenResourceError`` — expected when
+      the stream was already closed or the pipe broke after kill.
+    - **Bounded**: each stream close is individually wrapped in
+      ``anyio.move_on_after(timeout)`` so a wedged pipe cannot hang
+      shutdown.
+    - **Idempotent**: a second call is a no-op (closed streams raise, which
+      is swallowed).
+    - **Never raises**: always returns normally.
+    """
+    streams: list[tuple[str, Any]] = []
+    for name in ("stdin", "stdout", "stderr"):
+        stream = getattr(proc, name, None)
+        if stream is not None:
+            streams.append((name, stream))
+    for name, stream in streams:
+        with anyio.move_on_after(timeout):
+            try:
+                await stream.aclose()
+            except (
+                OSError,
+                ValueError,
+                ClosedResourceError,
+                BrokenResourceError,
+            ):
+                pass  # Already closed, broken, or consumed.
+
+
 @asynccontextmanager
 async def manage_subprocess(
-    cmd: Sequence[str], **kwargs: Any
+    cmd: Sequence[str],
+    *,
+    close_timeout: float | None = None,
+    **kwargs: Any,
 ) -> AsyncIterator[Process]:
     """Ensure subprocesses and their descendants are killed on cleanup.
 
     POSIX: SIGTERM → 2s grace → SIGKILL the process group.
     Windows: immediate ``taskkill /T /F`` (TerminateProcess only kills
     the direct child, leaving grandchildren orphaned).
+
+    After kill + wait, the stdio pipe transports are explicitly closed via
+    :func:`close_process_streams` (bounded by *close_timeout*, default
+    :data:`DEFAULT_SHUTDOWN_TIMEOUT_S`) to prevent the proactor
+    "Exception ignored … ValueError: I/O operation on closed pipe" noise
+    at interpreter teardown.
     """
+    if close_timeout is None:
+        close_timeout = DEFAULT_SHUTDOWN_TIMEOUT_S
     if os.name == "posix":
         kwargs.setdefault("start_new_session", True)
     elif os.name == "nt":
@@ -124,3 +185,6 @@ async def manage_subprocess(
                     if timed_out:
                         await kill_process_tree(proc)
                         await proc.wait()
+        # Explicitly close the stdio pipe transports to prevent the proactor
+        # __del__ ResourceWarning / ValueError noise at teardown.
+        await close_process_streams(proc, timeout=close_timeout)
