@@ -259,6 +259,42 @@ The handoff-as-new-session flow (Task 1, plan `docs/plans/2026-08-04-compact-han
 - `docs/how-to/compact-session.md`, `docs/reference/commands-and-directives.md`, `changelog.md`
 ---
 
+## Task 8: Cross-Engine Handoff (Destination Engine Selection)
+
+### Problem
+
+The handoff-as-new-session flow always creates the new session on the SAME engine (omp -> omp). Users cannot migrate a session across harnesses - e.g. summarize an omp session and continue it as a NEW grok session. User request 2026-08-04: "I want to make handoff from omp to grok."
+
+### Requirements
+
+1. Optional destination clause on both commands: `/handoff [/source] [to <dest>] [instructions]` and `/compact [/source] [to <dest>] [instructions]`.
+2. `to` is consumed only when followed by a KNOWN engine id (leading `/` tolerated); otherwise it stays instructions (`/handoff to do list` = instructions).
+3. Destination validation happens BEFORE the approval card: unknown/unavailable engine -> error reply, no card, no wasted agent turn.
+4. Approval card names both engines when destination differs ("handoff from omp to a NEW grok session? ...").
+5. Phase 2 seeds with `engine_override = destination or source`; store flip and footers then reference the destination engine.
+6. `/compact to <other-engine>` forces the handoff-migration path (with approval) even on compaction-capable engines; same-engine or absent destination keeps native behavior.
+7. No `to` clause -> destination = source engine (backward compatible with the Task 1 plan).
+8. Works with ALL harnesses: every configured engine is valid as BOTH source and destination (incl. plugin runners and `CompactSupport.none` engines); engine lists are derived from the router at runtime - no hardcoded engine names.
+
+### Dependencies
+
+- Task 1 handoff-new-session implementation (executor + approval infra).
+- Task 7 recommended first (shares `parse.py` / `compact.py`; this spec rebases on the generalized `parse_command_invocation`).
+
+### Plan
+
+- `docs/plans/2026-08-04-cross-engine-handoff.md` - approved delta spec.
+
+### Scope
+
+- `src/takopi/telegram/commands/parse.py` - `to <engine>` clause, `destination_engine` field
+- `src/takopi/scheduler.py` - `ThreadJob.handoff_target`
+- `src/takopi/telegram/commands/compact.py` - pending field, validation, approval text, forced-handoff routing
+- `src/takopi/telegram/loop.py` - phase 2 `engine_override`, completion wording
+- `tests/test_telegram_compact_dispatch.py`, parser test matrix
+- `docs/reference/commands-and-directives.md`, `docs/how-to/compact-session.md`, `changelog.md`
+---
+
 ## Workflow Convention
 
 All non-trivial tasks in this roadmap follow this sequence:
