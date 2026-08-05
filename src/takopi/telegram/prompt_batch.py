@@ -30,6 +30,7 @@ CONTROL_COMMANDS = frozenset(
         "queue",
         "file",
         "compact",
+        "handoff",
         "topic",
     }
 )

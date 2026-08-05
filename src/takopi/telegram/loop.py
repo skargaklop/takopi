@@ -75,7 +75,11 @@ from .commands.handlers import (
     should_show_resume_line,
 )
 from .commands.meta_args import should_handle_as_meta_command
-from .commands.parse import is_cancel_command, parse_compact_invocation
+from .commands.parse import (
+    is_cancel_command,
+    parse_compact_invocation,
+    parse_handoff_invocation,
+)
 from .commands.reply import make_reply
 from .context import _merge_topic_context, _usage_ctx_set, _usage_topic
 from .topics import (
@@ -2487,6 +2491,39 @@ async def run_main_loop(
                             running_tasks=state.running_tasks,
                             state=state,
                             ambient_context=ambient_context,
+                        )
+                    )
+                    return
+                handoff_invocation = parse_handoff_invocation(
+                    text, engine_ids=cfg.runtime.engine_ids
+                )
+                if handoff_invocation is not None:
+                    prompt_batcher.cancel(
+                        prompt_batcher.key_for_message(
+                            msg,
+                            topic_key=topic_key,
+                            chat_session_key=chat_session_key,
+                        )
+                    )
+                    tg.start_soon(
+                        partial(
+                            handle_compact,
+                            handoff_invocation.instructions,
+                            handoff_invocation.engine,
+                            cfg=cfg,
+                            msg=msg,
+                            reply=reply,
+                            scheduler=scheduler,
+                            resume_resolver=resume_resolver,
+                            topic_store=state.topic_store,
+                            chat_session_store=state.chat_session_store,
+                            topic_key=topic_key,
+                            chat_session_key=chat_session_key,
+                            reply_id=reply_id,
+                            running_tasks=state.running_tasks,
+                            state=state,
+                            ambient_context=ambient_context,
+                            force_handoff=True,
                         )
                     )
                     return

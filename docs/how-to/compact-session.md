@@ -100,3 +100,22 @@ If `/compact` produces no visible result (no ack, no completion, no error):
    ```
 
 4. **Restart the bridge** and retry `/compact`. You should see an ack message ("compacting…" or "creating handoff summary…") within seconds.
+
+## `/handoff` — clean session break for any engine
+
+`/handoff` runs the same approval → summary → new-session migration as `/compact` on no-compaction engines, but it works on **every** engine — including those with native compaction (claude, pi, codex, opencode). Use it when you want a **fresh session** with a handoff summary instead of in-place compaction.
+
+```text
+/handoff                          # handoff the active session
+/handoff keep the test plan       # with handoff instructions
+/codex /handoff                   # explicit engine selector
+```
+
+The flow is identical to the [handoff-as-new-session](#handoff-as-new-session-grok-omp-agy-and-engines-without-compaction) section above: approval card → phase 1 (summary in old session) → phase 2 (new session seeded) → routing flips → summary echoed.
+
+| Command | True-compaction engines | No-compaction engines |
+|---------|------------------------|----------------------|
+| `/compact` | Compacts **in place** immediately | Handoff migration (with approval) |
+| `/handoff` | Handoff migration (with approval) | Handoff migration (with approval) |
+
+On no-compaction engines, `/compact` and `/handoff` behave identically.

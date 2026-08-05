@@ -51,6 +51,7 @@ async def handle_compact_command(
     running_tasks: Mapping[object, object],
     state: TelegramLoopState,
     ambient_context: RunContext | None,
+    force_handoff: bool = False,
 ) -> None:
     """Resolve an existing session and enqueue a compact job on the scheduler.
 
@@ -142,19 +143,25 @@ async def handle_compact_command(
     runner = resolved.runner
     support = get_compact_support(runner)
 
-    # --- Approval gate for engines without true compaction ---
-    # handoff_only AND none both go through the approval gate (D1 approved).
+    # --- Approval gate ---
+    # Entered when: (a) /handoff (force_handoff=True, any engine), or
+    # (b) /compact on an engine without true compaction (D1: handoff_only + none).
     # The flow: approve -> phase 1 (handoff summary in OLD session) ->
     # phase 2 (seed NEW session with summary) -> routing flips.
-    if not support.true_compaction:
-        if support.mode == "none":
-            disclaimer = (
-                f"{resume_token.engine} does not support compaction at all.\n\n"
+    if force_handoff or not support.true_compaction:
+        if force_handoff and support.true_compaction:
+            # /handoff on a compaction-capable engine: neutral wording
+            # (do NOT claim the engine "cannot compact").
+            prefix = (
+                f"Start a NEW {resume_token.engine} session with a handoff "
+                "summary instead of compacting in place?\n\n"
             )
+        elif support.mode == "none":
+            prefix = f"{resume_token.engine} does not support compaction at all.\n\n"
         else:
-            disclaimer = f"{resume_token.engine} cannot compact natively.\n\n"
+            prefix = f"{resume_token.engine} cannot compact natively.\n\n"
         text = (
-            f"{disclaimer}"
+            f"{prefix}"
             "Takopi will:\n"
             "1. Ask the agent for a handoff summary,\n"
             "2. Start a NEW session seeded with it,\n"

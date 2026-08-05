@@ -23,6 +23,7 @@
 - `handoff_seed_prompt(summary)` in `compact.py`: seeds a new session with the full handoff summary and a "acknowledge briefly and wait" instruction.
 - `ThreadJob.kind` now includes `"handoff"` for the two-phase migration job.
 - Fixed pre-existing `tg.start_soon(confirmed=True)` kwargs bug in compact confirm/decline callback dispatch (now uses `functools.partial`).
+- `/handoff` command for all engines: always runs the approval → handoff summary → new-session migration, even on engines with native compaction. Ignores `compact_support()` entirely. Shares the same executor, parser, and approval gate as `/compact` (DRY). On no-compaction engines `/compact` and `/handoff` are identical; on true-compaction engines `/compact` compacts in place while `/handoff` forces a clean session break.
 
 ### changes
 

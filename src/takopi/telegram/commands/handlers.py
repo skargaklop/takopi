@@ -32,10 +32,10 @@ from .compact import handle_compact_command as handle_compact
 from .compact import handle_compact_confirm_callback as handle_compact_confirm
 from .compact import PendingCompactConfirm
 from .parse import parse_compact_invocation as parse_compact
+from .parse import parse_handoff_invocation as parse_handoff
 
 __all__ = [
     "dispatch_command",
-    "get_reserved_commands",
     "parse_callback_data",
     "handle_agent_command",
     "handle_chat_ctx_command",
@@ -64,4 +64,5 @@ __all__ = [
     "handle_compact_confirm",
     "PendingCompactConfirm",
     "parse_compact",
+    "parse_handoff",
 ]

@@ -214,7 +214,7 @@ The `acp` compact mode introduced in `f23baba` is a test-only stub: the only tra
 - `docs/reference/runners/omp/`, `docs/reference/runners/grok/`
 ---
 
-## Task 7: `/handoff` Command for All Engines
+## Task 7: `/handoff` Command for All Engines (DONE)
 
 ### Problem
 
@@ -238,6 +238,10 @@ The handoff-as-new-session flow (Task 1, plan `docs/plans/2026-08-04-compact-han
 ### Dependencies
 
 - Task 1 handoff-as-new-session implementation (approved plan above) must land first; this task adds the `/handoff` entry point on top of the shared executor.
+
+### Plan
+
+- `docs/plans/2026-08-04-handoff-command.md` - approved delta spec (entry points only; executor inherited from the Task 1 handoff plan).
 
 ### Investigation Steps
 

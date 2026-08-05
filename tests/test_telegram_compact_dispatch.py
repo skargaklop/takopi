@@ -25,6 +25,7 @@ from takopi.runner_bridge import ExecBridgeConfig
 from takopi.runners.mock import Raise, Return, ScriptRunner
 from takopi.telegram.bridge import TelegramBridgeConfig, run_main_loop
 from takopi.telegram.client import BotClient
+from takopi.telegram.commands.meta_args import should_handle_as_meta_command
 from takopi.telegram.types import TelegramCallbackQuery, TelegramIncomingMessage
 from takopi.transport import MessageRef, RenderedMessage, SendOptions
 from takopi.transport_runtime import TransportRuntime
@@ -94,9 +95,16 @@ class FakeBot(BotClient):
 class CompactableScriptRunner(ScriptRunner):
     """ScriptRunner that declares slash_prompt compact support and records compact calls."""
 
-    def __init__(self, *args, accepts_instructions: bool = True, **kwargs) -> None:
+    def __init__(
+        self,
+        *args,
+        accepts_instructions: bool = True,
+        compact_answer: str | None = None,
+        **kwargs,
+    ) -> None:
         super().__init__(*args, **kwargs)
         self._compact_accepts = accepts_instructions
+        self._compact_answer = compact_answer
         self.compact_calls: list[tuple[ResumeToken, str | None]] = []
 
     def compact_support(self) -> CompactSupport:
@@ -112,7 +120,12 @@ class CompactableScriptRunner(ScriptRunner):
         instructions: str | None = None,
     ) -> AsyncIterator[TakopiEvent]:
         self.compact_calls.append((resume, instructions))
-        yield TakopiEvent()  # minimal event
+        if self._compact_answer is not None:
+            yield CompletedEvent(
+                engine=self.engine, ok=True, answer=self._compact_answer, resume=resume
+            )
+        else:
+            yield TakopiEvent()  # minimal event
         del resume, instructions
 
 
@@ -682,3 +695,213 @@ async def test_handoff_completion_mentions_new_session_and_echoes_summary() -> N
     assert any("my cool summary" in s["message"].text for s in transport.send_calls), [
         s["message"].text for s in transport.send_calls
     ]
+
+
+# ---------------------------------------------------------------------------
+# /handoff command: always approval gate, every engine (Task 7).
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio
+async def test_handoff_command_on_true_compaction_engine_shows_approval() -> None:
+    """Test 8: /handoff on a true-compaction engine -> approval card; nothing runs."""
+    transport = FakeTransport()
+    codex = CompactableScriptRunner([Return(answer="ok")], engine=CODEX)
+    cfg = _make_multi_cfg(transport, [codex])
+
+    async def poller(_cfg):
+        yield _msg(
+            "/handoff",
+            message_id=10,
+            reply_to_message_id=5,
+            reply_to_text="done\n`codex resume c1`",
+        )
+
+    await run_main_loop(cfg, poller)
+    # No compact happened (approval gate stops it).
+    assert codex.compact_calls == []
+    # An approval card with keyboard was sent.
+    approve_sends = [
+        s for s in transport.send_calls if "approve handoff" in str(s["message"].extra)
+    ]
+    assert approve_sends, "expected approval card with keyboard"
+
+
+@pytest.mark.anyio
+async def test_handoff_command_approval_neutral_wording() -> None:
+    """Test 8b: /handoff on true-compaction engine uses neutral wording
+    (does NOT claim the engine cannot compact)."""
+    transport = FakeTransport()
+    codex = CompactableScriptRunner([Return(answer="ok")], engine=CODEX)
+    cfg = _make_multi_cfg(transport, [codex])
+
+    async def poller(_cfg):
+        yield _msg(
+            "/handoff",
+            message_id=10,
+            reply_to_message_id=5,
+            reply_to_text="done\n`codex resume c1`",
+        )
+
+    await run_main_loop(cfg, poller)
+    texts = [s["message"].text.lower() for s in transport.send_calls]
+    # Neutral wording present.
+    assert any("new codex session" in t for t in texts), texts
+    # Does NOT claim "cannot compact".
+    assert not any("cannot compact" in t for t in texts), texts
+    assert not any("does not support" in t for t in texts), texts
+
+
+@pytest.mark.anyio
+async def test_handoff_command_approve_runs_phase1_and_phase2() -> None:
+    """Test 9: approve -> phase 1 compact on OLD token; phase 2 seed run with resume=None."""
+    transport = FakeTransport()
+    codex = CompactableScriptRunner(
+        [Return(answer="ok")], engine=CODEX, compact_answer="the summary text"
+    )
+    cfg = _make_multi_cfg(transport, [codex])
+
+    async def poller(_cfg):
+        yield _msg(
+            "/handoff keep decisions",
+            message_id=10,
+            reply_to_message_id=5,
+            reply_to_text="done\n`codex resume c1`",
+        )
+        # FakeTransport assigns message_id=1 to the first send (approval card).
+        yield _cb(callback_data="takopi:compact:confirm", message_id=1)
+
+    await run_main_loop(cfg, poller)
+    # Phase 1: compact() was called on the OLD token.
+    assert len(codex.compact_calls) >= 1
+    assert codex.compact_calls[0][0] == ResumeToken(engine=CODEX, value="c1")
+    # Phase 2: run() called with resume=None (new session).
+    assert len(codex.calls) >= 1
+    phase2_prompt, phase2_resume = codex.calls[0]
+    assert phase2_resume is None  # new session
+    assert "handoff summary" in phase2_prompt.lower()
+    assert "the summary text" in phase2_prompt
+
+
+@pytest.mark.anyio
+async def test_handoff_command_on_handoff_engine_identical_flow() -> None:
+    """Test 10: /handoff on a handoff_only engine -> same flow as /compact there."""
+    transport = FakeTransport()
+    omp = HandoffScriptRunner([Return(answer="summary")], engine="omp")
+    cfg = _make_multi_cfg(transport, [omp])
+
+    async def poller(_cfg):
+        yield _msg(
+            "/handoff",
+            message_id=10,
+            reply_to_message_id=5,
+            reply_to_text="done\n`omp resume s1`",
+        )
+        yield _cb(callback_data="takopi:compact:confirm", message_id=1)
+
+    await run_main_loop(cfg, poller)
+    # Phase 1 ran (handoff_only engine uses compact() internally).
+    assert len(omp.calls) >= 2
+    # Completion message mentions new session.
+    texts = [s["message"].text.lower() for s in transport.send_calls]
+    assert any("new omp session" in t for t in texts), texts
+
+
+@pytest.mark.anyio
+async def test_handoff_command_decline_does_nothing() -> None:
+    """Test 11: decline -> nothing runs, store unchanged."""
+    transport = FakeTransport()
+    codex = CompactableScriptRunner([Return(answer="ok")], engine=CODEX)
+    cfg = _make_multi_cfg(transport, [codex])
+
+    async def poller(_cfg):
+        yield _msg(
+            "/handoff",
+            message_id=10,
+            reply_to_message_id=5,
+            reply_to_text="done\n`codex resume c1`",
+        )
+        yield _cb(callback_data="takopi:compact:decline", message_id=1)
+
+    await run_main_loop(cfg, poller)
+    assert codex.compact_calls == []
+    assert codex.calls == []
+    edit_texts = [s["message"].text.lower() for s in transport.edit_calls]
+    assert any("cancelled" in t for t in edit_texts), edit_texts
+
+
+@pytest.mark.anyio
+async def test_handoff_command_no_session_shows_guidance() -> None:
+    """Test 12: /handoff with no resolvable session -> guidance reply."""
+    transport = FakeTransport()
+    codex = CompactableScriptRunner([Return(answer="ok")], engine=CODEX)
+    cfg = _make_multi_cfg(transport, [codex])
+
+    async def poller(_cfg):
+        yield _msg("/handoff", message_id=10)
+
+    await run_main_loop(cfg, poller)
+    assert codex.compact_calls == []
+    assert any(
+        "no active session" in s["message"].text.lower()
+        or "no session" in s["message"].text.lower()
+        for s in transport.send_calls
+    )
+
+
+@pytest.mark.anyio
+async def test_handoff_command_not_swallowed_by_batcher() -> None:
+    """Test 13: /handoff with batch debounce > 0 is NOT batched (CONTROL_COMMANDS)."""
+    transport = FakeTransport()
+    codex = CompactableScriptRunner([Return(answer="ok")], engine=CODEX)
+    cfg = _make_multi_cfg(transport, [codex], prompt_batch_debounce_s=0.5)
+
+    async def poller(_cfg):
+        yield _msg(
+            "/handoff keep tests",
+            message_id=10,
+            reply_to_message_id=5,
+            reply_to_text="done\n`codex resume c1`",
+        )
+
+    await run_main_loop(cfg, poller)
+    # Approval card was sent (not swallowed by batcher).
+    approve_sends = [
+        s for s in transport.send_calls if "approve handoff" in str(s["message"].extra)
+    ]
+    assert approve_sends, "expected approval card with keyboard (not batched)"
+
+
+def test_handoff_command_registration() -> None:
+    """Test 14: handoff is registered as meta command and in bot menu."""
+    from takopi.telegram.commands.menu import build_bot_commands
+
+    assert should_handle_as_meta_command("handoff", "") is True
+    # Bot menu contains a handoff entry.
+    import inspect
+
+    source = inspect.getsource(build_bot_commands)
+    assert '"handoff"' in source
+
+
+@pytest.mark.anyio
+async def test_compact_on_true_compaction_engine_stays_immediate_regression() -> None:
+    """Test 15: Regression — /compact on true-compaction engine stays immediate."""
+    transport = FakeTransport()
+    codex = CompactableScriptRunner([Return(answer="ok")], engine=CODEX)
+    cfg = _make_multi_cfg(transport, [codex])
+
+    async def poller(_cfg):
+        yield _msg(
+            "/compact",
+            message_id=10,
+            reply_to_message_id=5,
+            reply_to_text="done\n`codex resume c1`",
+        )
+
+    await run_main_loop(cfg, poller)
+    assert len(codex.compact_calls) == 1
+    # No approval card.
+    assert not any(
+        "approve handoff" in str(s["message"].extra) for s in transport.send_calls
+    )

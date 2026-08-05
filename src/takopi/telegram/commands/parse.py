@@ -36,26 +36,27 @@ def _parse_slash_command(text: str) -> tuple[str | None, str]:
 
 @dataclass(frozen=True, slots=True)
 class CompactInvocation:
-    """Parsed result of a /compact invocation with optional engine selector."""
+    """Parsed result of a /compact (or /handoff) invocation with optional engine selector."""
 
     engine: EngineId | None
     instructions: str | None
 
 
-def parse_compact_invocation(
+def parse_command_invocation(
     text: str,
     *,
+    flag: str,
     engine_ids: tuple[EngineId, ...],
 ) -> CompactInvocation | None:
-    """Detect a /compact command in any leading-slash-token position.
+    """Detect a slash command (``/compact`` or ``/handoff``) in any leading position.
 
     Scans leading slash tokens (mirroring parse_directives). Recognizes
-    exactly one ``compact`` flag and at most one engine selector, in any
+    exactly one ``flag`` token and at most one engine selector, in any
     order. A second engine selector raises ``ValueError`` (mirrors
     parse_directives "multiple engine directives"). First non-slash or
     unknown slash token stops scanning; the remainder is the instructions.
 
-    Returns ``None`` when no ``compact`` token is found among the leading
+    Returns ``None`` when no ``flag`` token is found among the leading
     slash tokens.
     """
     stripped = text.lstrip()
@@ -73,7 +74,7 @@ def parse_compact_invocation(
     engine_map = {eid.lower(): eid for eid in engine_ids}
 
     engine: EngineId | None = None
-    found_compact = False
+    found_flag = False
     consumed = 0
 
     for token in tokens:
@@ -86,15 +87,15 @@ def parse_compact_invocation(
             break
         key = name.lower()
 
-        if key == "compact":
-            found_compact = True
+        if key == flag:
+            found_flag = True
             consumed += 1
             continue
 
         engine_candidate = engine_map.get(key)
         if engine_candidate is not None:
             if engine is not None:
-                raise ValueError("multiple engine selectors in /compact")
+                raise ValueError(f"multiple engine selectors in /{flag}")
             engine = engine_candidate
             consumed += 1
             continue
@@ -102,7 +103,7 @@ def parse_compact_invocation(
         # Unknown slash token — stop scanning.
         break
 
-    if not found_compact:
+    if not found_flag:
         return None
 
     # Reconstruct instructions from remaining tokens on this line + following lines.
@@ -117,3 +118,21 @@ def parse_compact_invocation(
     instructions = normalize_instructions(raw_instructions)
 
     return CompactInvocation(engine=engine, instructions=instructions)
+
+
+def parse_compact_invocation(
+    text: str,
+    *,
+    engine_ids: tuple[EngineId, ...],
+) -> CompactInvocation | None:
+    """Detect a ``/compact`` command. Delegates to :func:`parse_command_invocation`."""
+    return parse_command_invocation(text, flag="compact", engine_ids=engine_ids)
+
+
+def parse_handoff_invocation(
+    text: str,
+    *,
+    engine_ids: tuple[EngineId, ...],
+) -> CompactInvocation | None:
+    """Detect a ``/handoff`` command. Delegates to :func:`parse_command_invocation`."""
+    return parse_command_invocation(text, flag="handoff", engine_ids=engine_ids)

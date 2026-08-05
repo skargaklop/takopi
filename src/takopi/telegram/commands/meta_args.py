@@ -24,6 +24,7 @@ _PURE_META = frozenset(
         "model",
         "reasoning",
         "compact",
+        "handoff",
     }
 )
 

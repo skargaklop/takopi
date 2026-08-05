@@ -72,8 +72,10 @@ This line is parsed from replies and takes precedence over new directives.
 | `/goal` | Bare `/goal` shows help. `/goal <condition>` starts a **goal-mode agent run**. |
 | `/queue` | Show FIFO queue depth and previews for the active thread (reply to progress/final if needed). |
 | `/compact` | Compact the current session's context. Works in any position relative to engine selectors (`/codex /compact` = `/compact /codex`). Optional free-form text passes instructions (e.g. `/compact keep test plan`). Reply to any progress/final message or use in a chat/topic with an active session. Engines with native compaction (claude, pi, codex, opencode) run immediately. Engines without native compaction (grok, omp, agy, or unsupported) show an approval card: approve to produce a handoff summary and start a new session seeded with it (actual context reduction). |
+| `/handoff` | Start a new session with a handoff summary from the current session — for **every** engine, including those with native compaction. Works in any position relative to engine selectors (`/codex /handoff` = `/handoff /codex`). Optional free-form text passes instructions (e.g. `/handoff keep the test plan`). Always shows an approval card first (two buttons); on approve: (1) handoff summary produced in the old session, (2) new session seeded with the full summary, (3) routing flips to the new session, (4) summary echoed (truncated). Reply to any progress/final message or use in a chat/topic with an active session. |
 | `/file put <path>` | Upload a document into the repo/worktree (requires `transports.telegram.files.enabled`). |
 | `/file get <path>` | Fetch a file or directory back into Telegram. |
+
 
 **Agent → user files (Takopi-mediated):** when files are enabled and `send_enabled` is true, agents may deliver files by writing under the project and including:
 
@@ -102,6 +104,15 @@ Notes:
 - Sticky `/plan on` merges with per-message `/plan` for subsequent runs in that scope.
 - **Dual-mode commands:** `/plan` and `/goal` are both sticky/help bot commands **and** message directives. Free-form text after them starts an agent run (same as prefixing a normal prompt). Other slash commands (`/agent`, `/model`, `/reasoning`, `/trigger`, `/queue`, …) are meta-only and never fall through to a run.
 - **Shorthand sets:** `/agent claude`, `/model opus`, `/reasoning high` work without the `set` keyword (same as `/agent set claude`, etc.).
+
+### `/compact` vs `/handoff`
+
+Both share the same engine-resolution, session-resolution, and migration executor. The only difference is which engines take the approval-gate path:
+
+- **`/compact`** = reduce context. Engines with native compaction (claude, pi, codex, opencode) compact **in place** immediately. Engines without native compaction (grok, omp, agy, unsupported) show an approval card for the handoff-migration flow.
+- **`/handoff`** = always start a new session with a handoff summary, for **every** engine — including those that can compact natively. Ignores `compact_support()` entirely.
+
+On engines without native compaction, `/compact` and `/handoff` are identical. On engines with native compaction, `/compact` compacts in place while `/handoff` forces the handoff-migration (clean session break with a summary).
 
 ## CLI
 
