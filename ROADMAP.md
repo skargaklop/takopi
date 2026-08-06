@@ -590,9 +590,120 @@ Implemented: grok `build_args` plan mode emits native `--permission-mode plan` +
 - `docs/reference/runners/grok/probes/*.jsonl`, `plan-mode-cancel.md`, `runner.md`
 - `changelog.md`
 
-## Workflow Convention
+## Task 17: Grok Internal Error Handling (503 / Capacity Unavailable)
 
-All non-trivial tasks in this roadmap follow this sequence:
+### Problem
+
+Grok CLI (or its upstream API) can return transient errors like:
+
+```
+Internal error: { "message": "API error (status 503 Service Unavailable):
+Chat admission capacity is temporarily unavailable. Retry shortly.", ... }
+```
+
+Currently these surface as opaque failures to the Telegram user. Need to
+determine: (a) how the error appears in the grok streaming-json stream
+(`type: "error"` event vs stderr vs rc≠0), (b) whether the takopi grok
+runner can detect transient/retryable upstream errors and surface a
+user-readable message ("Grok capacity temporarily unavailable, please
+retry") instead of a raw JSON dump, and (c) whether automatic retry with
+backoff is feasible/worthwhile.
+
+### Requirements
+
+1. Capture a real 503 error stream (or synthesize from known grok error
+   event shape) and classify what takopi currently produces.
+2. Add a readable error message for known transient upstream failures
+   (503, capacity, overloaded, rate-limit). Map to the existing
+   `CompletedEvent.error` path.
+3. Optionally add bounded retry (1-2 attempts with backoff) for 503-class
+   errors only — not for genuine agent failures.
+4. Tests: unit test the error-classification + message mapping from a
+   fixture stream.
+
+### Plan
+
+- TBD: requires capturing the exact grok error event shape for a 503.
+
+### Scope
+
+- `src/takopi/runners/grok.py`
+- `tests/test_grok_runner.py`
+
+---
+
+## Task 18: Resolve All ty Type-Checker Diagnostics
+
+### Problem
+
+`ty check src tests` currently reports 41 diagnostics (down from 43 after
+Task 16 fixed the grok `ActionKind` annotations). The remaining diagnostics
+are pre-existing across multiple modules: `invalid-argument-type`,
+`unresolved-attribute`, `unsupported-operator`, `invalid-assignment`, and
+`invalid-return-type`. These indicate real type-safety gaps (e.g. wrong
+`Literal` values, missing attribute declarations on mixin-protocol classes,
+loose dict key types) that `ty` catches but the test suite doesn't.
+
+### Requirements
+
+1. Run `ty check src tests` and triage every diagnostic.
+2. Fix each at the source: correct annotations, narrow types, add missing
+   protocol/attribute declarations, fix return paths. Do NOT suppress with
+   `# type: ignore` unless there is a documented reason.
+3. Target: `ty check src tests` → 0 diagnostics.
+4. Regression: full pytest suite stays green; ruff stays clean.
+
+### Plan
+
+- TBD: triage needed to classify each diagnostic (real bug vs annotation
+  gap vs `ty` false positive).
+
+### Scope
+
+- `src/takopi/` (multiple modules)
+- `tests/` (test annotations)
+
+---
+
+## Task 19: GitHub Actions CI Stage (pytest + ruff + ty)
+
+### Problem
+
+No CI pipeline. Verification (pytest, ruff format/check, ty check) runs
+only locally. Pushed code is not gated; regressions can land on `master`
+undetected.
+
+### Requirements
+
+1. `.github/workflows/ci.yml`: single workflow triggered on push + PR to
+   `master`.
+2. Job matrix: Windows (primary target — the bot runs on Windows) and
+   Ubuntu (cross-platform sanity). Python 3.14.
+3. Steps:
+   - Checkout.
+   - Install `uv` (astral-sh/setup-uv).
+   - `uv sync`.
+   - `uv run ruff format --check src tests`.
+   - `uv run ruff check src tests`.
+   - `uv run ty check src tests` (allow this to fail initially if Task 18
+     is not done; convert to required gate after Task 18 completes).
+   - `uv run pytest tests/ -q --no-cov` (ignore known-broken
+     `test_subprocess_close.py` if still failing).
+4. Set `PYTHONUTF8=1` env var on all steps (Windows requirement).
+5. The ty step should use `continue-on-error: true` until Task 18 reaches
+   zero diagnostics, then become a hard gate.
+
+### Plan
+
+- TBD: confirm Windows runner availability and uv caching strategy.
+
+### Scope
+
+- `.github/workflows/ci.yml` (new)
+
+---
+
+## Workflow Convention
 
 ```
 1. Subagents gather documentation  →  save locally in docs/reference/
