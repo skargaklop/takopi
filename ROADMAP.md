@@ -35,7 +35,9 @@ The `/compact` slash command does not yet work in all message contexts:
 
 ---
 
-## Task 2: Pi Plan and Goal Mode Support
+## Task 2: Pi Plan and Goal Mode Support (DONE)
+
+Implemented in `cad570f` (extension detection, `--plan` gating, soft-plan fallback, 8 new tests; full suite 950 green per implementation report).
 
 ### Problem
 
@@ -463,7 +465,9 @@ Live evidence 2026-08-05: repeated `grok run stopped (cancelled)` mid-run in pla
 
 ---
 
-## Task 13: Grok Tool Titles + Narration Delimiter Upgrade
+## Task 13: Grok Tool Titles + Narration Delimiter Upgrade (DONE)
+
+Implemented in `c032637` (`_GROK_TOOL_NAME_MAP` adapter, tool-event segment closing).
 
 ### Problem
 
@@ -488,6 +492,94 @@ Live evidence 2026-08-05 (pi implementation run):
 - `src/takopi/runners/grok.py` - `_grok_tool_kind_and_title` adapter + segment closing on tool events
 - `tests/test_grok_runner.py`
 - `docs/reference/runners/grok/tool-fields.md`, `runner.md`
+- `changelog.md`
+
+---
+
+---
+
+## Task 14: Transient Upstream Failure Handling (Retry + Clean Errors)
+
+### Problem
+
+Live evidence 2026-08-06: a grok run failed rc=1 with `action_count=0` and the user received a raw JSON blob (`Internal error: {"message": "API error (status 503 ... Chat admission capacity is temporarily unavailable. Retry shortly.")`). Two takopi-side defects: (1) no automatic retry for an explicitly transient, retry-asked upstream error; (2) an unformatted JSON blob as the user-facing message.
+
+### Requirements
+
+1. Failure classifier: recognize transient upstream failures (HTTP 503/429, admission capacity, overloaded, rate limit, retry phrases) from CLI output blobs (`Internal error: {json}` parsed via json.loads); extract a clean one-line message; non-matching failures unchanged.
+2. Bounded auto-retry in the runner run path (JsonlSubprocessRunner choke point; codex/agy reuse the classifier): retry ONLY when the attempt produced zero side effects (no session start, no actions, empty answer); linear backoff; user-visible progress note per attempt.
+3. Configurable bounds in `RunnerSettings`: `retry_max_attempts` (default 3), `retry_base_delay_s` (default 5.0); documented in `docs/reference/config.md`; no other hardcoded values.
+4. After exhaustion: one clean message (`<engine> upstream is temporarily unavailable (HTTP 503): ... Try again in a few minutes.`) - never the raw JSON.
+5. Cancellation during backoff aborts promptly; non-transient errors behave exactly as today.
+
+### Plan
+
+- `docs/plans/2026-08-06-transient-upstream-retry.md` - approved spec.
+
+### Scope
+
+- `src/takopi/runner.py` / `src/takopi/utils/` - classifier + retry loop
+- `src/takopi/settings.py` - `RunnerSettings` retry keys
+- `src/takopi/runners/codex.py`, `runners/agy.py` - classifier reuse
+- `tests/test_transient_retry.py`, `tests/test_runner_utils.py`
+- `docs/reference/config.md`, `changelog.md`
+
+---
+
+---
+
+## Task 15: Plan-Mode Cancel Prevention (Grok)
+
+### Problem
+
+Live evidence 2026-08-06, AFTER the Task 12 rebuild: a `/plan` grok run still ends "error - grok - 2m 28s - step 22" with the (new, correct) message "plan-mode turn cancelled by the harness". Task 12 fixed the surfacing and removed the mandatory-write instruction, but the cancellation itself remains: the agent hits the harness plan-mode abort by its own initiative (forbidden tool call, or a plan-approval flow headless cannot answer). The exact trigger is UNKNOWN - Task 11 already proved the cancel is not reproducible on demand in normal runs.
+
+### Requirements
+
+1. A0 capture first: reproduce a plan-mode cancellation, capture the raw stream (`stream-sample-plan-cancel.jsonl`), classify the trigger (forbidden tool_call vs approval-flow vs other), and probe whether `--deny` rules degrade gracefully (deny tool, turn continues) instead of aborting.
+2. Fix path selected by the A0 evidence: (A) `--deny` rules instead of `--permission-mode plan`; (B) soft-plan prompt instead of native plan (documented trade-off); (C) approval-cancel pattern mapped to successful plan delivery.
+3. Salvage safety net (always implement): plan-mode cancel WITH non-empty trailing plan text completes as a usable result (plan delivered + enforcement note), not an opaque error; empty-answer cancels keep the Task 12 error message.
+4. User-initiated `/cancel` semantics unchanged; Task 9/10/11 behaviors stay green.
+
+### Plan
+
+- `docs/plans/2026-08-06-plan-mode-cancel-prevention.md` - approved spec.
+
+### Scope
+
+- `src/takopi/runners/grok.py` - path A/B/C change + salvage mapping
+- (conditional) `src/takopi/runners/modes.py`
+- `tests/test_grok_runner.py`
+- `docs/reference/runners/grok/stream-sample-plan-cancel.jsonl`, `plan-mode-cancel.md`
+- `changelog.md`
+
+---
+
+---
+
+## Task 16: Grok Native Plan Mode Without Cancellations (Hard-Enforcement Probe)
+
+### Problem
+
+User question 2026-08-06: keep native `--permission-mode plan` (hard read-only guarantee) AND avoid plan-mode cancellations - e.g. plan + auto-approve simultaneously, or another mechanism. Task 15 chose the soft-plan prefix (Path B) as the safe baseline; whether a hard-enforcement combination exists is unverified. The cancellation trigger (Task 15 A0): in plan mode a write/execute tool call requires an approval headless cannot provide -> the harness cancels the turn.
+
+### Requirements
+
+1. Probe matrix (5 tiny headless runs, write-inducing prompt, streams captured): C1 plan+`--always-approve`; C2 default+`--deny` rules; C3 plan+`--rules` reinforcement; C4 `--sandbox` profile; C5 `dontAsk` mode.
+2. Winner criteria: turn completes AND nothing is written AND the plan is delivered. C1 must be disk-checked for an actual file write (worst case: silent plan-mode bypass).
+3. If a winner exists: grok `build_args` plan mode emits it (replacing the Path B soft prefix), with tests from the winning stream. If none wins: Path B stays; the finding is pinned in docs.
+4. The Task 15 salvage net stays as the last defense line regardless.
+5. Task 15 must be committed FIRST (safe baseline) before Task 16 experimentation begins.
+
+### Plan
+
+- `docs/plans/2026-08-06-grok-plan-hard-enforcement-probe.md` - approved spec.
+
+### Scope
+
+- `src/takopi/runners/grok.py` (only if a winner exists)
+- `tests/test_grok_runner.py`, (conditional) `test_plan_goal_modes.py`
+- `docs/reference/runners/grok/probes/*.jsonl`, `plan-hard-enforcement.md`
 - `changelog.md`
 
 ---
