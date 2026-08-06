@@ -22,6 +22,8 @@ from .plan_cmd import is_sticky_plan_args
 from .goal_cmd import is_sticky_goal_args
 from .queue_cmd import _handle_queue_command as handle_queue_command
 from .reasoning import _handle_reasoning_command as handle_reasoning_command
+from .subagent_cmd import _handle_subagent_command as handle_subagent_command
+from .subagent_cmd import is_sticky_subagent_args
 from .topics import _handle_chat_new_command as handle_chat_new_command
 from .topics import _handle_chat_ctx_command as handle_chat_ctx_command
 from .topics import _handle_ctx_command as handle_ctx_command
@@ -48,6 +50,7 @@ __all__ = [
     "handle_model_command",
     "handle_new_command",
     "handle_plan_command",
+    "handle_subagent_command",
     "handle_queue_command",
     "handle_reasoning_command",
     "handle_topic_command",
@@ -55,6 +58,7 @@ __all__ = [
     "is_agent_meta_args",
     "is_sticky_goal_args",
     "is_sticky_plan_args",
+    "is_sticky_subagent_args",
     "parse_slash_command",
     "should_handle_as_meta_command",
     "run_engine",

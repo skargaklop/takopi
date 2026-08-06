@@ -10,6 +10,7 @@ from collections.abc import Collection
 
 from .goal_cmd import is_sticky_goal_args
 from .plan_cmd import is_sticky_plan_args
+from .subagent_cmd import is_sticky_subagent_args
 
 # Pure meta commands: never fall through to an agent prompt.
 _PURE_META = frozenset(
@@ -60,5 +61,5 @@ def should_handle_as_meta_command(
         return is_sticky_plan_args(args_text)
     if cmd == "goal":
         return is_sticky_goal_args(args_text)
-    # Unknown builtin id: let other dispatch paths decide.
-    return True
+    if cmd == "subagent":
+        return is_sticky_subagent_args(args_text)

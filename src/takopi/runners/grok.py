@@ -420,6 +420,9 @@ class GrokRunner(HandoffCompactMixin, ResumeTokenMixin, JsonlSubprocessRunner):
         if reasoning is not None:
             args.extend(["--effort", str(reasoning)])
 
+        if run_options is not None and run_options.subagent:
+            args.extend(["--agent", str(run_options.subagent)])
+
         tools = _coerce_comma_list(self.tools)
         if tools is not None:
             args.extend(["--tools", tools])

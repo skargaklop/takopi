@@ -21,6 +21,7 @@ class _ChatPrefs(msgspec.Struct, forbid_unknown_fields=False):
     context_project: str | None = None
     context_branch: str | None = None
     plan_mode: bool | None = None
+    subagent: str | None = None
     engine_overrides: dict[str, EngineOverrides] = msgspec.field(default_factory=dict)
 
 
@@ -231,6 +232,31 @@ class ChatPrefsStore(JsonStateStore[_ChatPrefsState]):
             chat.plan_mode = bool(enabled)
             self._save_locked()
 
+    async def get_subagent(self, chat_id: int) -> str | None:
+        async with self._lock:
+            self._reload_locked_if_needed()
+            chat = self._get_chat_locked(chat_id)
+            if chat is None:
+                return None
+            return _normalize_text(chat.subagent)
+
+    async def set_subagent(self, chat_id: int, name: str | None) -> None:
+        async with self._lock:
+            self._reload_locked_if_needed()
+            normalized = _normalize_text(name)
+            chat = self._get_chat_locked(chat_id)
+            if normalized is None:
+                if chat is None:
+                    return
+                chat.subagent = None
+                if self._chat_is_empty(chat):
+                    self._remove_chat_locked(chat_id)
+                self._save_locked()
+                return
+            chat = self._ensure_chat_locked(chat_id)
+            chat.subagent = normalized
+            self._save_locked()
+
     def _get_chat_locked(self, chat_id: int) -> _ChatPrefs | None:
         return self._state.chats.get(_chat_key(chat_id))
 
@@ -250,6 +276,7 @@ class ChatPrefsStore(JsonStateStore[_ChatPrefsState]):
             and _normalize_text(chat.context_project) is None
             and _normalize_text(chat.context_branch) is None
             and chat.plan_mode is None
+            and _normalize_text(chat.subagent) is None
             and not self._has_engine_overrides(chat.engine_overrides)
         )
 

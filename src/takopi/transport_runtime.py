@@ -44,6 +44,8 @@ class ResolvedMessage:
     context_source: ContextSource = "none"
     plan: bool = False
     goal: str | None = None
+    skill: str | None = None
+    subagent: str | None = None
     # Explicit resume from the user-sent text only (highest priority source).
     user_resume: ResumeToken | None = None
     # Bare `resume <id>` when engine not yet known (bind with sticky engine later).
@@ -233,6 +235,8 @@ class TransportRuntime:
             context_source=context_source,
             plan=bool(directives.plan),
             goal=directives.goal,
+            skill=directives.skill,
+            subagent=directives.subagent,
             user_resume=user_resume,
             bare_resume_id=bare_resume_id,
             reply_resume=reply_resume,

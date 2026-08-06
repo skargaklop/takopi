@@ -61,6 +61,7 @@ from .commands.handlers import (
     handle_model_command,
     handle_new_command,
     handle_plan_command,
+    handle_subagent_command,
     handle_queue_command,
     handle_reasoning_command,
     handle_topic_command,
@@ -200,6 +201,8 @@ async def _resolve_engine_run_options(
     *,
     plan: bool = False,
     goal: str | None = None,
+    skill: str | None = None,
+    subagent: str | None = None,
 ) -> EngineRunOptions | None:
     topic_override = None
     if topic_store is not None and thread_id is not None:
@@ -216,13 +219,25 @@ async def _resolve_engine_run_options(
     effective_plan = bool(plan) or sticky_plan
     if goal:
         effective_plan = False
-    if merged is None and not effective_plan and not goal:
+    # Sticky subagent preference (chat scope). Explicit one-shot wins.
+    effective_subagent = subagent
+    if effective_subagent is None and chat_prefs is not None:
+        effective_subagent = await chat_prefs.get_subagent(chat_id)
+    if (
+        merged is None
+        and not effective_plan
+        and not goal
+        and skill is None
+        and effective_subagent is None
+    ):
         return None
     return EngineRunOptions(
         model=merged.model if merged is not None else None,
         reasoning=merged.reasoning if merged is not None else None,
         plan=effective_plan,
         goal=goal.strip() if goal else None,
+        skill=skill,
+        subagent=effective_subagent,
     )
 
 
@@ -431,6 +446,17 @@ def _dispatch_builtin_command(
             chat_prefs,
             resolved_scope=resolved_scope,
             scope_chat_ids=scope_chat_ids,
+        )
+        task_group.start_soon(handler)
+        return True
+
+    if command_id == "subagent":
+        handler = partial(
+            handle_subagent_command,
+            cfg,
+            msg,
+            args_text,
+            chat_prefs,
         )
         task_group.start_soon(handler)
         return True
@@ -1625,6 +1651,8 @@ async def run_main_loop(
                 attachments: tuple[PromptAttachment, ...] = (),
                 plan: bool = False,
                 goal: str | None = None,
+                skill: str | None = None,
+                subagent: str | None = None,
             ) -> None:
                 topic_key = (
                     (chat_id, thread_id)
@@ -1660,6 +1688,8 @@ async def run_main_loop(
                     topic_store=state.topic_store,
                     plan=plan,
                     goal=goal,
+                    skill=skill,
+                    subagent=subagent,
                 )
                 if attachments:
                     run_options = merge_run_options(
@@ -2066,6 +2096,8 @@ async def run_main_loop(
                 resume_token = resume_decision.resume_token
                 plan = bool(resolved.plan)
                 goal = resolved.goal
+                skill = resolved.skill
+                subagent = resolved.subagent
                 if resume_token is None:
                     await run_job(
                         chat_id,
@@ -2082,6 +2114,8 @@ async def run_main_loop(
                         attachments,
                         plan,
                         goal,
+                        skill,
+                        subagent,
                     )
                     return
                 is_queued = await scheduler.is_busy(resume_token)

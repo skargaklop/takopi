@@ -57,6 +57,19 @@ def test_is_sticky_goal_args() -> None:
     assert is_sticky_goal_args("all tests pass") is False
 
 
+def test_is_sticky_subagent_args() -> None:
+    from takopi.telegram.commands.subagent_cmd import is_sticky_subagent_args
+
+    assert is_sticky_subagent_args("") is True
+    assert is_sticky_subagent_args("show") is True
+    assert is_sticky_subagent_args("off") is True
+    assert is_sticky_subagent_args("clear") is True
+    assert is_sticky_subagent_args("set scout") is True
+    assert is_sticky_subagent_args("scout") is False
+    assert is_sticky_subagent_args("scout explore") is False
+    assert is_sticky_subagent_args("set") is False
+
+
 def test_meta_vs_freeform_dispatch_matrix() -> None:
     """Audit: only plan/goal free-form fall through to agent runs."""
     from takopi.telegram.commands.meta_args import should_handle_as_meta_command
@@ -80,7 +93,17 @@ def test_meta_vs_freeform_dispatch_matrix() -> None:
     assert should_handle_as_meta_command("plan", "", engine_ids=engines) is True
     assert should_handle_as_meta_command("plan", "on", engine_ids=engines) is True
     assert should_handle_as_meta_command("goal", "", engine_ids=engines) is True
-
+    # Subagent dual-mode: free-form → agent run, sticky/show → meta
+    assert (
+        should_handle_as_meta_command("subagent", "scout explore", engine_ids=engines)
+        is False
+    )
+    assert should_handle_as_meta_command("subagent", "", engine_ids=engines) is True
+    assert should_handle_as_meta_command("subagent", "off", engine_ids=engines) is True
+    assert (
+        should_handle_as_meta_command("subagent", "set scout", engine_ids=engines)
+        is True
+    )
     # Pure meta: always handled (never agent-run fallthrough)
     for cmd in (
         "agent",
@@ -421,3 +444,182 @@ def test_format_context_line_unchanged_when_no_mode() -> None:
     ctx = RunContext(project="z80", branch="feat")
     assert format_context_line(ctx, projects=_projects_with()) == "`ctx: z80 @feat`"
     assert format_context_line(None, projects=_empty_projects()) is None
+
+
+# --- skill / subagent directives ---
+
+
+def test_parse_directives_skill_inline() -> None:
+    d = parse_directives(
+        "/codex --skill tdd write tests",
+        engine_ids=("codex", "claude"),
+        projects=_empty_projects(),
+    )
+    assert d.skill == "tdd"
+    assert d.subagent is None
+    assert d.engine == "codex"
+    assert d.prompt == "write tests"
+
+
+def test_parse_directives_skill_slash() -> None:
+    d = parse_directives(
+        "/codex /skill tdd write tests",
+        engine_ids=("codex", "claude"),
+        projects=_empty_projects(),
+    )
+    assert d.skill == "tdd"
+    assert d.prompt == "write tests"
+
+
+def test_parse_directives_subagent_inline() -> None:
+    d = parse_directives(
+        "/grok --subagent reviewer review this",
+        engine_ids=("grok", "claude"),
+        projects=_empty_projects(),
+    )
+    assert d.subagent == "reviewer"
+    assert d.skill is None
+    assert d.prompt == "review this"
+
+
+def test_parse_directives_subagent_slash() -> None:
+    d = parse_directives(
+        "/codex /subagent scout explore the tree",
+        engine_ids=("codex", "claude"),
+        projects=_empty_projects(),
+    )
+    assert d.subagent == "scout"
+    assert d.prompt == "explore the tree"
+
+
+def test_parse_directives_skill_and_subagent() -> None:
+    d = parse_directives(
+        "/codex --skill tdd --subagent scout do thing",
+        engine_ids=("codex",),
+        projects=_empty_projects(),
+    )
+    assert d.skill == "tdd"
+    assert d.subagent == "scout"
+    assert d.prompt == "do thing"
+
+
+def test_parse_directives_skill_before_engine() -> None:
+    d = parse_directives(
+        "--skill tdd /codex write tests",
+        engine_ids=("codex",),
+        projects=_empty_projects(),
+    )
+    assert d.skill == "tdd"
+    assert d.engine == "codex"
+    assert d.prompt == "write tests"
+
+
+def test_parse_directives_skill_requires_value() -> None:
+    import pytest
+
+    from takopi.directives import DirectiveError
+
+    with pytest.raises(DirectiveError):
+        parse_directives(
+            "/codex --skill",
+            engine_ids=("codex",),
+            projects=_empty_projects(),
+        )
+
+
+def test_parse_directives_duplicate_skill_errors() -> None:
+    import pytest
+
+    from takopi.directives import DirectiveError
+
+    with pytest.raises(DirectiveError):
+        parse_directives(
+            "/codex --skill tdd --skill other go",
+            engine_ids=("codex",),
+            projects=_empty_projects(),
+        )
+
+
+def test_parse_directives_no_skill_keeps_field_none() -> None:
+    d = parse_directives(
+        "/codex write tests",
+        engine_ids=("codex",),
+        projects=_empty_projects(),
+    )
+    assert d.skill is None
+    assert d.subagent is None
+
+
+def test_merge_run_options_preserves_skill() -> None:
+    base = EngineRunOptions(skill="tdd")
+    merged = merge_run_options(base)
+    assert merged is not None
+    assert merged.skill == "tdd"
+
+
+def test_merge_run_options_skill_from_none_base() -> None:
+    merged = merge_run_options(None, subagent="scout")
+    assert merged is not None
+    assert merged.subagent == "scout"
+
+
+def test_grok_subagent_injects_agent_flag() -> None:
+    runner = GrokRunner(grok_cmd="grok", yolo=True)
+    state = GrokStreamState(
+        resume=ResumeToken(engine="grok", value="sid"), started=False
+    )
+    with apply_run_options(EngineRunOptions(subagent="reviewer")):
+        args = runner.build_args("review it", None, state=state)
+    assert "--agent" in args
+    assert args[args.index("--agent") + 1] == "reviewer"
+
+
+def test_grok_no_subagent_omits_agent_flag() -> None:
+    runner = GrokRunner(grok_cmd="grok", yolo=True)
+    state = GrokStreamState(
+        resume=ResumeToken(engine="grok", value="sid"), started=False
+    )
+    args = runner.build_args("do it", None, state=state)
+    assert "--agent" not in args
+
+
+def test_claude_subagent_injects_agent_flag() -> None:
+    runner = ClaudeRunner(claude_cmd="claude", dangerously_skip_permissions=True)
+    with apply_run_options(EngineRunOptions(subagent="reviewer")):
+        args = runner.build_args("review it", None, state=None)
+    assert "--agent" in args
+    assert args[args.index("--agent") + 1] == "reviewer"
+
+
+def test_build_bot_commands_includes_subagent() -> None:
+    import inspect
+
+    from takopi.telegram.commands.menu import build_bot_commands
+
+    source = inspect.getsource(build_bot_commands)
+    assert "subagent" in source
+    assert "sticky subagent" in source
+
+
+def test_subagent_reserved_command_id() -> None:
+    from takopi.ids import RESERVED_COMMAND_IDS
+
+    assert "subagent" in RESERVED_COMMAND_IDS
+
+
+def test_opencode_subagent_overrides_plan_agent() -> None:
+    runner = OpenCodeRunner(opencode_cmd="opencode", plan_agent="plan")
+    state = OpenCodeStreamState()
+    with apply_run_options(EngineRunOptions(subagent="reviewer")):
+        args = runner.build_args("review it", None, state=state)
+    assert "--agent" in args
+    assert args[args.index("--agent") + 1] == "reviewer"
+
+
+def test_opencode_plan_agent_when_no_subagent() -> None:
+    runner = OpenCodeRunner(opencode_cmd="opencode", plan_agent="plan")
+    state = OpenCodeStreamState()
+    with apply_run_options(EngineRunOptions(plan=True)):
+        args = runner.build_args("design it", None, state=state)
+    assert "--agent" in args
+    assert args[args.index("--agent") + 1] == "plan"

@@ -23,6 +23,8 @@ class EngineRunOptions:
     attachments: tuple[PromptAttachment, ...] = ()
     plan: bool = False
     goal: str | None = None
+    skill: str | None = None
+    subagent: str | None = None
 
 
 def merge_run_options(
@@ -33,6 +35,8 @@ def merge_run_options(
     goal: str | None = None,
     model: str | None = None,
     reasoning: str | None = None,
+    skill: str | None = None,
+    subagent: str | None = None,
 ) -> EngineRunOptions | None:
     if (
         base is None
@@ -41,6 +45,8 @@ def merge_run_options(
         and goal is None
         and model is None
         and reasoning is None
+        and skill is None
+        and subagent is None
     ):
         return None
     base_atts = base.attachments if base is not None else ()
@@ -58,12 +64,20 @@ def merge_run_options(
     new_reasoning = base.reasoning if base is not None else None
     if reasoning is not None:
         new_reasoning = reasoning
+    new_skill = base.skill if base is not None else None
+    if skill is not None:
+        new_skill = skill
+    new_subagent = base.subagent if base is not None else None
+    if subagent is not None:
+        new_subagent = subagent
     opts = EngineRunOptions(
         model=new_model,
         reasoning=new_reasoning,
         attachments=new_atts,
         plan=new_plan,
         goal=new_goal,
+        skill=new_skill,
+        subagent=new_subagent,
     )
     if (
         opts.model is None
@@ -71,6 +85,8 @@ def merge_run_options(
         and not opts.attachments
         and not opts.plan
         and opts.goal is None
+        and opts.skill is None
+        and opts.subagent is None
     ):
         return None
     return opts

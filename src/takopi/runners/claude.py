@@ -331,6 +331,8 @@ class ClaudeRunner(SlashCompactMixin, ResumeTokenMixin, JsonlSubprocessRunner):
         if run_options is not None and run_options.reasoning:
             args.extend(["--effort", str(run_options.reasoning)])
             args.extend(["--settings", '{"alwaysThinkingEnabled":true}'])
+        if run_options is not None and run_options.subagent:
+            args.extend(["--agent", str(run_options.subagent)])
         args.append("--")
         args.append(prompt)
         return args

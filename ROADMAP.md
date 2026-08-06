@@ -70,7 +70,17 @@ Pi runner does not support `plan` and `goal` modes, even though the required pi 
 
 ---
 
-## Task 3: Subagent and Skill Selection Support
+## Task 3: Subagent and Skill Selection Support — DONE
+
+### Post-implementation notes (2026-08-06)
+
+- **Parser**: `parse_directives` recognizes `--skill <name>`, `--subagent <name>` (inline) and `/skill <name>`, `/subagent <name>` (slash) in the leading command area, in any order with the engine selector. Multiple occurrences raise `DirectiveError`. Missing values raise `DirectiveError`.
+- **Data flow**: `ParsedDirectives` → `ResolvedMessage` → `EngineRunOptions` (new `skill`/`subagent` fields) → `build_args()`.
+- **Sticky**: `/subagent` is dual-mode (mirrors `/plan`): bare / `show` / `off` / `clear` / `set <name>` are meta (chat-scoped via `ChatPrefsStore.get_subagent`/`set_subagent`); `/subagent <name> <prompt>` falls through as a one-shot directive. Explicit one-shot wins over sticky.
+- **Runner injection**: grok, claude, opencode inject `--agent <name>` when `run_options.subagent` is set. opencode's subagent overrides plan-agent. codex `--profile` mapping is documented but not yet wired (codex profiles ≠ agents). pi/omp/agy have no named-agent flag (documented no-op).
+- **Skill**: `run_options.skill` is parsed and carried through but not yet injected into any runner's `build_args` — reserved for future harness-side skill activation (harnesses resolve skills via prompt directives like `/skill-name`, not CLI flags).
+- **A0 evidence**: `docs/reference/runners/capability-matrix.md` (CLI `--help` quotes for all 7 engines).
+- **Tests**: +18 tests (parser forms, merge_run_options, grok/claude/opencode --agent injection, sticky store roundtrip/clear/empty/plan-isolation, is_sticky_subagent_args, dispatch matrix, bot menu, reserved id). 969 passed total.
 
 ### Problem
 

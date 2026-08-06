@@ -20,6 +20,8 @@ class ParsedDirectives:
     branch: str | None
     plan: bool = False
     goal: str | None = None
+    skill: str | None = None
+    subagent: str | None = None
 
 
 class DirectiveError(RuntimeError):
@@ -59,12 +61,36 @@ def parse_directives(
     branch: str | None = None
     plan = False
     goal: str | None = None
+    skill: str | None = None
+    subagent: str | None = None
     consumed = 0
-    goal_started = False
 
-    for token in tokens:
-        if goal_started:
-            break
+    def _next_value(kind: str) -> str:
+        """Resolve the next token as the argument for a skill/subagent option."""
+        nonlocal consumed
+        next_pos = consumed + 1
+        if next_pos >= len(tokens):
+            raise DirectiveError(f"{kind} requires a value")
+        return tokens[next_pos]
+
+    while consumed < len(tokens):
+        token = tokens[consumed]
+        # Inline options: --skill <name> / --subagent <name>
+        lower = token.lower()
+        if lower == "--skill":
+            value = _next_value("--skill")
+            if skill is not None:
+                raise DirectiveError("multiple --skill directives")
+            skill = value
+            consumed += 2
+            continue
+        if lower == "--subagent":
+            value = _next_value("--subagent")
+            if subagent is not None:
+                raise DirectiveError("multiple --subagent directives")
+            subagent = value
+            consumed += 2
+            continue
         if token.startswith("/"):
             name = token[1:]
             if "@" in name:
@@ -94,7 +120,24 @@ def parse_directives(
                     branch=branch,
                     plan=plan and goal is None,  # goal wins over plan
                     goal=goal,
+                    skill=skill,
+                    subagent=subagent,
                 )
+            # Slash forms: /skill <name> / /subagent <name> (generic one-arg)
+            if key == "skill":
+                value = _next_value("/skill")
+                if skill is not None:
+                    raise DirectiveError("multiple /skill directives")
+                skill = value
+                consumed += 2
+                continue
+            if key == "subagent":
+                value = _next_value("/subagent")
+                if subagent is not None:
+                    raise DirectiveError("multiple /subagent directives")
+                subagent = value
+                consumed += 2
+                continue
             engine_candidate = engine_map.get(key)
             project_candidate = project_map.get(key)
             if engine_candidate is not None:
@@ -121,9 +164,20 @@ def parse_directives(
             continue
         break
 
-    if consumed == 0 and not plan and goal is None:
+    if (
+        consumed == 0
+        and not plan
+        and goal is None
+        and skill is None
+        and subagent is None
+    ):
         return ParsedDirectives(
-            prompt=text, engine=None, project=None, branch=None, plan=False, goal=None
+            prompt=text,
+            engine=None,
+            project=None,
+            branch=None,
+            plan=False,
+            goal=None,
         )
 
     if consumed < len(tokens):
@@ -143,6 +197,8 @@ def parse_directives(
         branch=branch,
         plan=plan,
         goal=goal,
+        skill=skill,
+        subagent=subagent,
     )
 
 

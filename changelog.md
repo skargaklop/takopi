@@ -31,6 +31,7 @@
 - grok tool-call mapping: `tool_call` and `tool_call_update` events from the grok CLI now become `action_started` / `action_completed` `ActionEvent`s via the shared `tool_kind_and_title` helper (same pattern as the claude runner). Tool activity is visible in progress steps instead of being silently dropped. Duplicate `tool_call` starts for the same `toolCallId` are suppressed.
 - grok usage telemetry: mid-stream `usage` events are buffered and merged into the terminal `CompletedEvent.usage` (end-event usage takes precedence on conflicts).
 - grok forward compatibility: unknown event types (e.g. future CLI additions) now decode to a `StreamUnknownEvent` catch-all (DEBUG log, no events) instead of raising `msgspec.ValidationError` and spamming the log at WARNING level. Only genuinely malformed JSON triggers a warning.
+- subagent and skill selection: `/codex --subagent <name> <prompt>` (or `/subagent <name>`) selects a named subagent for a one-shot run; `--skill <name>` (or `/skill <name>`) selects a skill. Both forms parse in the leading command area alongside the engine selector and are name-passthrough (no validation — the harness resolves the name). Sticky `/subagent set <name>` / `/subagent off` / `/subagent clear` (chat-scoped) mirrors `/plan`. Wired for grok, claude, and opencode (`--agent`); codex maps to `--profile`. See [capability matrix](reference/runners/capability-matrix.md).
 
 ### changes
 

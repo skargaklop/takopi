@@ -13,6 +13,8 @@ Takopi parses the first non-empty line of a message for a directive prefix.
 | `@branch` | `@feat/happy-camera rewind to checkpoint` | Run in a worktree for the branch. |
 | `/plan` | `/plan /claude design auth` | Enable **agent plan mode** for this run (read-only / plan-first where the CLI supports it). |
 | `/goal …` | `/goal all tests pass` | Enable **goal mode** (autonomous loop until condition). Rest of message is the condition. |
+| `--subagent <name>` / `/subagent <name>` | `/codex --subagent reviewer review this` | Select a named **subagent** for this run (one-shot; name passed through to the harness). |
+| `--skill <name>` / `/skill <name>` | `/codex --skill tdd write tests` | Select a named **skill** for this run (one-shot; name passed through to the harness). |
 | `resume <id>` | `resume abc123 continue` | **Explicit session resume** (universal alias for all engines, including `agy`). Highest priority over reply/auto-session. |
 | Combined | `/happy-gadgets @feat/flower-pin observe unseen` | Project + branch. |
 
@@ -46,6 +48,19 @@ Notes:
 | pi | yes | no | `--plan` (pi-plan-mode extension) | soft note |
 | opencode | yes | no | soft, or `--agent` if `opencode.plan_agent` set | soft note |
 
+### Subagent selection capability (engines)
+
+| Engine | `--subagent` / `/subagent` mapping | Notes |
+|--------|-------------------------------------|-------|
+| grok | `--agent <name>` | Native subagent support. |
+| claude | `--agent <name>` | Native subagent support. |
+| opencode | `--agent <name>` | Overrides `plan_agent` when both set. |
+| codex | `--profile <name>` (not yet wired) | Codex profiles ≠ agents; best-effort. |
+| pi / omp | no-op | No named-agent CLI flag. |
+| agy | no-op | No named-agent CLI flag. |
+
+`--skill` / `/skill` is parsed and carried but not yet injected into any runner — skills are resolved by the harness via prompt directives (e.g. Claude's `/skill-name`). See [capability matrix](runners/capability-matrix.md) for CLI evidence.
+
 See [Context resolution](context-resolution.md) for the full rules.
 
 ## Context footer (`ctx:`)
@@ -68,8 +83,8 @@ This line is parsed from replies and takes precedence over new directives.
 | `/model` | Show/set the model override for the current scope. |
 | `/reasoning` | Show/set the reasoning override for the current scope. |
 | `/trigger` | Show/set trigger mode (mentions-only vs all). |
-| `/plan` | Show sticky plan mode; `/plan on` \| `off` \| `clear` for chat/topic scope. Free-form `/plan <prompt>` (optionally with `/engine`) starts a **plan-mode agent run**. |
 | `/goal` | Bare `/goal` shows help. `/goal <condition>` starts a **goal-mode agent run**. |
+| `/subagent` | Show sticky subagent; `/subagent set <name>` \| `off` \| `clear` for chat scope. Free-form `/subagent <name> <prompt>` (optionally with `/engine`) is a **one-shot subagent run**. |
 | `/queue` | Show FIFO queue depth and previews for the active thread (reply to progress/final if needed). |
 | `/compact` | Compact the current session's context. Works in any position relative to engine selectors (`/codex /compact` = `/compact /codex`). Optional free-form text passes instructions (e.g. `/compact keep test plan`). Optional `to <engine>` migrates to a different engine (e.g. `/compact to grok` forces the handoff-migration path). Reply to any progress/final message or use in a chat/topic with an active session. Engines with native compaction (claude, pi, codex, opencode) run immediately. Engines without native compaction (grok, omp, agy, or unsupported) show an approval card: approve to produce a handoff summary and start a new session seeded with it (actual context reduction). |
 | `/handoff` | Start a new session with a handoff summary from the current session — for **every** engine, including those with native compaction. Works in any position relative to engine selectors (`/codex /handoff` = `/handoff /codex`). Optional free-form text passes instructions (e.g. `/handoff keep the test plan`). Optional `to <engine>` migrates to a different engine (e.g. `/handoff to grok`). Always shows an approval card first (two buttons); on approve: (1) handoff summary produced in the old session, (2) new session seeded with the full summary, (3) routing flips to the new session, (4) summary echoed (truncated). Reply to any progress/final message or use in a chat/topic with an active session. |
@@ -102,7 +117,8 @@ Notes:
 - In topics, `/ctx` binds the topic context.
 - `/new` clears sessions but does **not** clear a bound context.
 - Sticky `/plan on` merges with per-message `/plan` for subsequent runs in that scope.
-- **Dual-mode commands:** `/plan` and `/goal` are both sticky/help bot commands **and** message directives. Free-form text after them starts an agent run (same as prefixing a normal prompt). Other slash commands (`/agent`, `/model`, `/reasoning`, `/trigger`, `/queue`, …) are meta-only and never fall through to a run.
+- Sticky `/subagent set <name>` applies to subsequent runs in that chat; an explicit `--subagent`/`/subagent` one-shot wins for that run. `/subagent off` or `clear` removes the sticky.
+- **Dual-mode commands:** `/plan`, `/goal`, and `/subagent` are both sticky/help bot commands **and** message directives. Free-form text after them starts an agent run (same as prefixing a normal prompt). Other slash commands (`/agent`, `/model`, `/reasoning`, `/trigger`, `/queue`, …) are meta-only and never fall through to a run.
 - **Shorthand sets:** `/agent claude`, `/model opus`, `/reasoning high` work without the `set` keyword (same as `/agent set claude`, etc.).
 
 ### `/compact` vs `/handoff`

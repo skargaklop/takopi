@@ -19,6 +19,7 @@ RESERVED_CHAT_COMMANDS = frozenset(
         "ctx",
         "plan",
         "goal",
+        "subagent",
         "queue",
     }
 )

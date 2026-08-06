@@ -433,7 +433,9 @@ class OpenCodeRunner(ResumeTokenMixin, JsonlSubprocessRunner):
             args.append("--print-logs")
         if self.log_level:
             args.extend(["--log-level", self.log_level])
-        if plan and self.plan_agent:
+        if run_options is not None and run_options.subagent:
+            args.extend(["--agent", str(run_options.subagent)])
+        elif plan and self.plan_agent:
             args.extend(["--agent", str(self.plan_agent)])
         if _NUMERIC_PROMPT_RE.fullmatch(prompt):
             prompt = f"{prompt}."

@@ -78,6 +78,7 @@ def build_bot_commands(
         ("reasoning", "set reasoning override"),
         ("trigger", "set trigger mode"),
         ("plan", "sticky plan mode on/off"),
+        ("subagent", "sticky subagent on/off/clear"),
         ("goal", "help for goal mode"),
         ("queue", "show thread job queue"),
         ("compact", "compact current session"),
