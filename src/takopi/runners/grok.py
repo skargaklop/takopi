@@ -167,6 +167,43 @@ _GROK_PATH_KEYS: tuple[str, ...] = (
     "path",
 )
 
+# Grok tool-name -> canonical name understood by the shared helper.
+# Tools not listed here fall through to the generic ("tool", tool_name) tail.
+_GROK_TOOL_NAME_MAP: dict[str, str] = {
+    "run_terminal_command": "bash",
+    "read_file": "read",
+    "search_replace": "edit",
+    "write": "edit",
+    "list_dir": "ls",
+    "grep": "grep",
+    "todo_write": "todowrite",
+    "spawn_subagent": "task",
+}
+
+# Grok rawInput field -> normalized field (shared helper looks for these).
+_GROK_INPUT_FIELD_MAP: dict[str, str] = {
+    "target_file": "file_path",
+    "target_directory": "path",
+}
+
+
+def _grok_tool_kind_and_title(
+    tool_name: str,
+    raw_input: Any,
+) -> tuple[str, str]:
+    """Map grok tool names/fields to the shared helper's canonical contract.
+
+    Translates the grok tool name (e.g. ``run_terminal_command``) to the
+    canonical name (``bash``) and normalizes input fields (``target_file`` →
+    ``file_path``), then delegates to :func:`tool_kind_and_title`.
+    """
+    canonical = _GROK_TOOL_NAME_MAP.get(tool_name.lower(), tool_name)
+    normalized: dict[str, Any] = dict(raw_input) if raw_input else {}
+    for grok_key, canon_key in _GROK_INPUT_FIELD_MAP.items():
+        if grok_key in normalized:
+            normalized[canon_key] = normalized[grok_key]
+    return tool_kind_and_title(canonical, normalized, path_keys=_GROK_PATH_KEYS)
+
 
 def translate_grok_event(
     event: grok_schema.GrokEvent,
@@ -191,12 +228,15 @@ def translate_grok_event(
         case grok_schema.StreamToolCallEvent():
             # Flush any pending thoughts before the tool action.
             _flush_pending_thought(state, out)
+            # Tool calls act as narration delimiters: text accumulated before
+            # a tool call is narration, not the final answer.
+            _close_text_segment(state)
             call_id = event.toolCallId
             if call_id and call_id not in state.seen_tool_calls:
                 state.seen_tool_calls.add(call_id)
                 tool_name = str(event.toolName or event.title or "tool")
-                kind, action_title = tool_kind_and_title(
-                    tool_name, event.rawInput, path_keys=_GROK_PATH_KEYS
+                kind, action_title = _grok_tool_kind_and_title(
+                    tool_name, event.rawInput
                 )
                 state.tool_call_meta[call_id] = (kind, action_title)
                 detail: dict[str, Any] = {"name": tool_name, "input": event.rawInput}
@@ -212,6 +252,7 @@ def translate_grok_event(
 
         case grok_schema.StreamToolCallUpdateEvent():
             _flush_pending_thought(state, out)
+            _close_text_segment(state)
             call_id = event.toolCallId
             status = (event.status or "").lower()
             ok = status != "error"

@@ -573,9 +573,10 @@ def test_tool_call_emits_action_started() -> None:
     started = [e for e in events if isinstance(e, ActionEvent) and e.phase == "started"]
     assert len(started) == 1
     assert started[0].action.id == "call-1"
-    # Shared helper maps list_dir -> kind "tool" (unrecognized tool name).
+    # Grok adapter maps list_dir -> canonical "ls" -> kind "tool" with path.
     assert started[0].action.kind == "tool"
-    assert "list_dir" in started[0].action.title
+    assert "ls" in started[0].action.title.lower()
+    assert "." in started[0].action.title
 
 
 def test_tool_call_bash_emits_command_kind() -> None:
@@ -767,3 +768,192 @@ def test_non_plan_cancelled_keeps_old_message() -> None:
     completed = [e for e in events if isinstance(e, CompletedEvent)][0]
     assert completed.ok is False
     assert completed.error == "grok run stopped (cancelled)"
+
+
+# ---------------------------------------------------------------------------
+# Task 13: Grok tool-title adapter + tool events as narration delimiters
+# ---------------------------------------------------------------------------
+
+
+def test_grok_tool_run_terminal_command_maps_to_command() -> None:
+    """run_terminal_command -> kind 'command', title contains the command text."""
+    events, state = _run_events(
+        [
+            b'{"type":"tool_call","toolCallId":"call-cmd","toolName":"run_terminal_command",'
+            b'"rawInput":{"command":"uv run pytest -q"}}',
+            b'{"type":"tool_call_update","toolCallId":"call-cmd","status":"completed"}',
+            b'{"type":"end","stopReason":"EndTurn","sessionId":"dddddddd-dddd-dddd-dddd-dddddddddddd"}',
+        ]
+    )
+    started = [e for e in events if isinstance(e, ActionEvent) and e.phase == "started"]
+    assert len(started) == 1
+    assert started[0].action.kind == "command"
+    assert "uv run pytest" in started[0].action.title
+
+
+def test_grok_tool_read_file_maps_to_read_with_path() -> None:
+    """read_file -> kind 'tool', title shows read: '<path>'."""
+    events, state = _run_events(
+        [
+            b'{"type":"tool_call","toolCallId":"call-read","toolName":"read_file",'
+            b'"rawInput":{"target_file":"src/main.py"}}',
+            b'{"type":"end","stopReason":"EndTurn","sessionId":"dddddddd-dddd-dddd-dddd-dddddddddddd"}',
+        ]
+    )
+    started = [e for e in events if isinstance(e, ActionEvent) and e.phase == "started"]
+    assert len(started) == 1
+    assert started[0].action.kind == "tool"
+    assert "read" in started[0].action.title
+    assert "src/main.py" in started[0].action.title
+
+
+def test_grok_tool_search_replace_maps_to_file_change() -> None:
+    """search_replace -> kind 'file_change', title shows relativized path."""
+    events, state = _run_events(
+        [
+            b'{"type":"tool_call","toolCallId":"call-edit","toolName":"search_replace",'
+            b'"rawInput":{"target_file":"src/takopi/runners/grok.py"}}',
+            b'{"type":"end","stopReason":"EndTurn","sessionId":"dddddddd-dddd-dddd-dddd-dddddddddddd"}',
+        ]
+    )
+    started = [e for e in events if isinstance(e, ActionEvent) and e.phase == "started"]
+    assert len(started) == 1
+    assert started[0].action.kind == "file_change"
+    assert "grok.py" in started[0].action.title
+
+
+def test_grok_tool_list_dir_maps_to_ls_with_path() -> None:
+    """list_dir -> kind 'tool', title shows ls: '<path>'."""
+    events, state = _run_events(
+        [
+            b'{"type":"tool_call","toolCallId":"call-ls","toolName":"list_dir",'
+            b'"rawInput":{"target_directory":"."}}',
+            b'{"type":"end","stopReason":"EndTurn","sessionId":"dddddddd-dddd-dddd-dddd-dddddddddddd"}',
+        ]
+    )
+    started = [e for e in events if isinstance(e, ActionEvent) and e.phase == "started"]
+    assert len(started) == 1
+    assert started[0].action.kind == "tool"
+    assert "ls" in started[0].action.title.lower()
+
+
+def test_grok_tool_grep_maps_to_grep_with_pattern() -> None:
+    """grep -> kind 'tool', title shows the pattern."""
+    events, state = _run_events(
+        [
+            b'{"type":"tool_call","toolCallId":"call-grep","toolName":"grep",'
+            b'"rawInput":{"pattern":"def translate"}}',
+            b'{"type":"end","stopReason":"EndTurn","sessionId":"dddddddd-dddd-dddd-dddd-dddddddddddd"}',
+        ]
+    )
+    started = [e for e in events if isinstance(e, ActionEvent) and e.phase == "started"]
+    assert len(started) == 1
+    assert started[0].action.kind == "tool"
+    assert "def translate" in started[0].action.title
+
+
+def test_grok_tool_todo_write_maps_to_note() -> None:
+    """todo_write -> kind 'note', title mentions todos."""
+    events, state = _run_events(
+        [
+            b'{"type":"tool_call","toolCallId":"call-todo","toolName":"todo_write",'
+            b'"rawInput":{"todos":[]}}',
+            b'{"type":"end","stopReason":"EndTurn","sessionId":"dddddddd-dddd-dddd-dddd-dddddddddddd"}',
+        ]
+    )
+    started = [e for e in events if isinstance(e, ActionEvent) and e.phase == "started"]
+    assert len(started) == 1
+    assert started[0].action.kind == "note"
+    assert "todo" in started[0].action.title.lower()
+
+
+def test_grok_tool_spawn_subagent_maps_to_subagent() -> None:
+    """spawn_subagent -> kind 'subagent', title shows description."""
+    events, state = _run_events(
+        [
+            b'{"type":"tool_call","toolCallId":"call-sub","toolName":"spawn_subagent",'
+            b'"rawInput":{"description":"explore codebase","prompt":"find all tests"}}',
+            b'{"type":"end","stopReason":"EndTurn","sessionId":"dddddddd-dddd-dddd-dddd-dddddddddddd"}',
+        ]
+    )
+    started = [e for e in events if isinstance(e, ActionEvent) and e.phase == "started"]
+    assert len(started) == 1
+    assert started[0].action.kind == "subagent"
+    assert "explore codebase" in started[0].action.title
+
+
+def test_grok_tool_unknown_maps_to_generic_fallback() -> None:
+    """Unknown tool name -> generic ('tool', tool_name) fallback (regression)."""
+    events, state = _run_events(
+        [
+            b'{"type":"tool_call","toolCallId":"call-unk","toolName":"mystery_tool",'
+            b'"rawInput":{}}',
+            b'{"type":"end","stopReason":"EndTurn","sessionId":"dddddddd-dddd-dddd-dddd-dddddddddddd"}',
+        ]
+    )
+    started = [e for e in events if isinstance(e, ActionEvent) and e.phase == "started"]
+    assert len(started) == 1
+    assert started[0].action.kind == "tool"
+    assert "mystery_tool" in started[0].action.title
+
+
+def test_grok_tool_call_meta_reused_on_update() -> None:
+    """tool_call_update uses the SAME kind/title as the start event."""
+    events, state = _run_events(
+        [
+            b'{"type":"tool_call","toolCallId":"call-reuse","toolName":"run_terminal_command",'
+            b'"rawInput":{"command":"echo hi"}}',
+            b'{"type":"tool_call_update","toolCallId":"call-reuse","status":"completed"}',
+            b'{"type":"end","stopReason":"EndTurn","sessionId":"dddddddd-dddd-dddd-dddd-dddddddddddd"}',
+        ]
+    )
+    started = [e for e in events if isinstance(e, ActionEvent) and e.phase == "started"]
+    completed_acts = [
+        e for e in events if isinstance(e, ActionEvent) and e.phase == "completed"
+    ]
+    assert len(started) == 1
+    assert len(completed_acts) == 1
+    assert started[0].action.kind == completed_acts[0].action.kind
+    assert started[0].action.title == completed_acts[0].action.title
+
+
+def test_tool_event_closes_text_segment_narration() -> None:
+    """Narration between two tool calls -> note action; trailing text = answer.
+
+    The tool_call acts as a narration delimiter, same as a thought event:
+    text before the tool call is narration; text after the last tool event
+    is the answer.
+    """
+    events, state = _run_events(
+        [
+            b'{"type":"text","data":"Let me check the tests."}',
+            b'{"type":"tool_call","toolCallId":"t1","toolName":"run_terminal_command",'
+            b'"rawInput":{"command":"uv run pytest"}}',
+            b'{"type":"tool_call_update","toolCallId":"t1","status":"completed"}',
+            b'{"type":"text","data":"All tests passed. Here is the summary."}',
+            b'{"type":"end","stopReason":"EndTurn","sessionId":"dddddddd-dddd-dddd-dddd-dddddddddddd"}',
+        ]
+    )
+    completed = [e for e in events if isinstance(e, CompletedEvent)][0]
+    # Answer = trailing text after the last tool event.
+    assert completed.answer == "All tests passed. Here is the summary."
+    # Narration before the tool call became a note action.
+    actions = [e for e in events if isinstance(e, ActionEvent)]
+    narration_notes = [a for a in actions if "Let me check" in a.action.title]
+    assert len(narration_notes) == 1
+
+
+def test_no_trailing_text_after_tool_answer_falls_back() -> None:
+    """No trailing text after the last tool event -> answer is empty (no leak)."""
+    events, state = _run_events(
+        [
+            b'{"type":"text","data":"Running tests."}',
+            b'{"type":"tool_call","toolCallId":"t1","toolName":"run_terminal_command",'
+            b'"rawInput":{"command":"pytest"}}',
+            b'{"type":"tool_call_update","toolCallId":"t1","status":"completed"}',
+            b'{"type":"end","stopReason":"EndTurn","sessionId":"dddddddd-dddd-dddd-dddd-dddddddddddd"}',
+        ]
+    )
+    completed = [e for e in events if isinstance(e, CompletedEvent)][0]
+    # No text after the tool event -> empty answer.
+    assert completed.answer == ""
