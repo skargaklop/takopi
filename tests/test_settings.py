@@ -365,3 +365,40 @@ def test_logging_invalid_format_rejected() -> None:
                 "logging": {"format": "xml"},
             }
         )
+
+
+def test_runner_settings_defaults() -> None:
+    from takopi.settings import RunnerSettings
+
+    s = RunnerSettings()
+    assert s.retry_max_attempts == 3
+    assert s.retry_base_delay_s == 5.0
+
+
+def test_runner_settings_retry_overrides() -> None:
+    from takopi.settings import RunnerSettings
+
+    s = RunnerSettings(retry_max_attempts=5, retry_base_delay_s=2.5)
+    assert s.retry_max_attempts == 5
+    assert s.retry_base_delay_s == 2.5
+
+
+def test_runner_settings_rejects_invalid_retry_values() -> None:
+    from takopi.settings import RunnerSettings
+
+    with pytest.raises(ValidationError):
+        RunnerSettings(retry_max_attempts=0)
+    with pytest.raises(ValidationError):
+        RunnerSettings(retry_base_delay_s=-1.0)
+
+
+def test_runner_settings_from_takopi_config() -> None:
+    settings = TakopiSettings.model_validate(
+        {
+            "transport": "telegram",
+            "transports": {"telegram": {"bot_token": "t", "chat_id": 1}},
+            "runners": {"retry_max_attempts": 7, "retry_base_delay_s": 3.0},
+        }
+    )
+    assert settings.runners.retry_max_attempts == 7
+    assert settings.runners.retry_base_delay_s == 3.0

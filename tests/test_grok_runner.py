@@ -222,6 +222,54 @@ def test_translate_error_fixture() -> None:
     assert "Partial answer" in completed.answer
 
 
+def test_translate_capacity_error_fixture_clean_message() -> None:
+    """The synthesized 503 capacity fixture must map to a clean error.
+
+    The translate layer passes the raw ``Internal error: {json}`` blob as
+    ``CompletedEvent.error``. The shared retry loop in ``JsonlSubprocessRunner``
+    classifies it into a clean message; this test verifies the translation
+    layer preserves usage/resume and delivers the raw blob for classification.
+    """
+    from takopi.utils.transient_failures import (
+        classify_transient_failure,
+        format_transient_failure,
+    )
+
+    session_id = "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee"
+    state = GrokStreamState(
+        resume=ResumeToken(engine=ENGINE, value=session_id),
+        started=False,
+    )
+    events: list = []
+    for event in _load_fixture("grok_stream_capacity_error.jsonl"):
+        events.extend(
+            translate_grok_event(
+                event,
+                title="grok",
+                state=state,
+            )
+        )
+
+    completed = next(evt for evt in events if isinstance(evt, CompletedEvent))
+    assert completed.ok is False
+    assert completed.error is not None
+    # The raw blob is delivered for classification by the retry loop.
+    assert "Internal error" in completed.error
+    assert "503" in completed.error
+    assert completed.resume is not None
+    assert completed.resume.value == session_id
+
+    # Verify the classifier produces a clean message from this blob.
+    failure = classify_transient_failure(completed.error)
+    assert failure is not None
+    assert failure.http_status == 503
+    clean = format_transient_failure("grok", failure)
+    assert "temporarily unavailable" in clean
+    assert "{" not in clean
+    assert "Internal error" not in clean
+    assert "Retry shortly" not in clean
+
+
 def test_translate_emits_started_once() -> None:
     session_id = "cccccccc-cccc-cccc-cccc-cccccccccccc"
     state = GrokStreamState(

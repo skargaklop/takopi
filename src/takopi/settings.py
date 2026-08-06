@@ -233,6 +233,8 @@ class RunnerSettings(BaseModel):
     idle_timeout_s: float = 900.0
     kill_tree_on_cancel: bool = True
     shutdown_timeout_s: float = 5.0
+    retry_max_attempts: int = Field(default=3, ge=1)
+    retry_base_delay_s: float = Field(default=5.0, ge=0.0)
 
 
 class TakopiSettings(BaseSettings):

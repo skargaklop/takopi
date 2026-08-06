@@ -168,13 +168,16 @@ Global lifecycle settings applied to ALL runners.
     idle_timeout_s = 900.0
     kill_tree_on_cancel = true
     shutdown_timeout_s = 5.0
-    ```
+    retry_max_attempts = 3
+    retry_base_delay_s = 5.0
 
 | Key | Type | Default | Notes |
 |-----|------|---------|-------|
 | `startup_timeout_s` | float | `60.0` | Seconds to wait for the first JSONL line before declaring a startup timeout. |
 | `idle_timeout_s` | float | `900.0` | Seconds of inactivity between JSONL lines before declaring an idle timeout. |
 | `kill_tree_on_cancel` | bool | `true` | Kill the entire subprocess tree (not just the direct child) on cancellation. |
+| `retry_max_attempts` | int | `3` | Total subprocess attempts (including the first) for transient upstream failures. Only attempts with no session start, actions, or answer output are retried. |
+| `retry_base_delay_s` | float | `5.0` | Base delay in seconds for linear backoff between retry attempts. Actual delay is `retry_base_delay_s * current_attempt`. |
 | `shutdown_timeout_s` | float | `5.0` | Per-stream timeout when closing stdio pipe transports during shutdown. Bounds cleanup so a wedged pipe cannot hang exit. |
 
 ## Plugins

@@ -552,3 +552,270 @@ async def test_lock_released_after_cancel() -> None:
         async for _ in runner.run("second", token):
             pass
     assert started.is_set()
+
+
+def _make_attempt_runner(
+    attempts: list[tuple[list[bytes], int, list[str]]],
+) -> _DummyJsonlRunner:
+    """Build a JSONL runner that scripts each spawn's stdout, rc, and stderr.
+
+    ``attempts`` is indexed by spawn count (0-based). Each entry is
+    ``(stdout_lines, exit_code, stderr_lines)``. Each fake process captures its
+    attempt index at construction so stdout/rc/stderr stay consistent even
+    though the background ``drain_stderr`` task may run interleaved.
+    """
+
+    class _FakeProc:
+        def __init__(self, idx: int) -> None:
+            self._idx = idx
+            self.stdout = object()
+            self.stderr = object()
+            self.stdin = None
+            self.pid = 100 + idx
+
+        async def wait(self) -> int:
+            return attempts[self._idx][1]
+
+    class _FakeManager:
+        def __init__(self, idx: int) -> None:
+            self._proc = _FakeProc(idx)
+
+        async def __aenter__(self):
+            return self._proc
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+    spawn_counter = {"n": 0}
+
+    class _AttemptRunner(_DummyJsonlRunner):
+        engine = "attempt-jsonl"
+        retry_max_attempts = 3
+        retry_base_delay_s = 0.0  # keep tests fast
+
+        def stdin_payload(self, prompt, resume, *, state):  # type: ignore[override]
+            return None
+
+        async def iter_json_lines(self, stream):  # type: ignore[override]
+            idx = min(spawn_counter["n"] - 1, len(attempts) - 1)
+            for line in attempts[max(0, idx)][0]:
+                yield line
+
+        def translate(self, data, *, state, resume, found_session):  # type: ignore[override]
+            if isinstance(data, dict) and data.get("type") == "started":
+                token = ResumeToken(engine=self.engine, value="sid")
+                return [StartedEvent(engine=self.engine, resume=token, title="t")]
+            if isinstance(data, dict) and data.get("type") == "completed":
+                token = ResumeToken(engine=self.engine, value="sid")
+                error = data.get("error")
+                answer = data.get("answer", "")
+                return [
+                    CompletedEvent(
+                        engine=self.engine,
+                        ok=bool(data.get("ok", False)),
+                        answer=answer,
+                        resume=token,
+                        error=error if isinstance(error, str) else None,
+                    )
+                ]
+            return []
+
+    runner = _AttemptRunner()
+
+    async def fake_drain_stderr(stream, logger, tag, capture=None):
+        # drain_stderr runs as a background task; read the pid from the fake
+        # process to determine which attempt's stderr to emit.
+        idx = min(spawn_counter["n"] - 1, len(attempts) - 1)
+        idx = max(0, idx)
+        if capture is not None:
+            for line in attempts[idx][2]:
+                capture.append(line)
+
+    def fake_manage_subprocess(*args, **kwargs):
+        idx = spawn_counter["n"]
+        spawn_counter["n"] += 1
+        return _FakeManager(idx)
+
+    runner_module.manage_subprocess = fake_manage_subprocess  # type: ignore[assignment]
+    runner_module.drain_stderr = fake_drain_stderr  # type: ignore[assignment]
+    return runner
+
+
+@pytest.mark.anyio
+async def test_retry_two_failures_then_success(monkeypatch: pytest.MonkeyPatch) -> None:
+    original_manage = runner_module.manage_subprocess
+    original_drain = runner_module.drain_stderr
+    try:
+        blob = (
+            'Internal error: {"message": "API error (status 503): '
+            'capacity temporarily unavailable. Retry shortly.", '
+            '"http_status": 503}'
+        )
+        runner = _make_attempt_runner(
+            [
+                ([], 1, [blob]),  # attempt 1: stderr-only 503
+                ([], 1, [blob]),  # attempt 2: stderr-only 503
+                (
+                    [b'{"type": "completed", "ok": true, "answer": "ok"}'],
+                    0,
+                    [],
+                ),
+            ]
+        )
+        events = [evt async for evt in runner.run_impl("hello", None)]
+    finally:
+        runner_module.manage_subprocess = original_manage  # type: ignore[assignment]
+        runner_module.drain_stderr = original_drain  # type: ignore[assignment]
+
+    notes = [
+        evt
+        for evt in events
+        if isinstance(evt, ActionEvent) and evt.action.kind == "warning"
+    ]
+    completions = [evt for evt in events if isinstance(evt, CompletedEvent)]
+    assert len(notes) == 2
+    assert all("retrying in 0s" in n.action.title for n in notes)
+    assert notes[0].action.title.endswith("(attempt 2/3)")
+    assert notes[1].action.title.endswith("(attempt 3/3)")
+    assert len(completions) == 1
+    assert completions[0].ok is True
+    assert completions[0].answer == "ok"
+
+
+@pytest.mark.anyio
+async def test_retry_exhausted_emits_clean_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original_manage = runner_module.manage_subprocess
+    original_drain = runner_module.drain_stderr
+    try:
+        blob = (
+            'Internal error: {"message": "API error (status 503): '
+            'capacity temporarily unavailable. Retry shortly.", '
+            '"http_status": 503}'
+        )
+        runner = _make_attempt_runner(
+            [
+                ([], 1, [blob]),
+                ([], 1, [blob]),
+                ([], 1, [blob]),
+            ]
+        )
+        events = [evt async for evt in runner.run_impl("hello", None)]
+    finally:
+        runner_module.manage_subprocess = original_manage  # type: ignore[assignment]
+        runner_module.drain_stderr = original_drain  # type: ignore[assignment]
+
+    completions = [evt for evt in events if isinstance(evt, CompletedEvent)]
+    notes = [
+        evt
+        for evt in events
+        if isinstance(evt, ActionEvent) and evt.action.kind == "warning"
+    ]
+    assert len(notes) == 2  # two retry notes before exhaustion
+    assert len(completions) == 1
+    error = completions[0].error
+    assert error is not None
+    assert "temporarily unavailable" in error
+    assert "{" not in error
+    assert "Internal error" not in error
+    assert "rc=" not in error
+
+
+@pytest.mark.anyio
+async def test_no_retry_after_started_event(monkeypatch: pytest.MonkeyPatch) -> None:
+    original_manage = runner_module.manage_subprocess
+    original_drain = runner_module.drain_stderr
+    try:
+        runner = _make_attempt_runner(
+            [
+                (
+                    [
+                        b'{"type": "started", "resume": "sid"}',
+                        b'{"type": "completed", "ok": false, "error": "HTTP 503 overloaded"}',
+                    ],
+                    0,
+                    [],
+                ),
+            ]
+        )
+        events = [evt async for evt in runner.run_impl("hello", None)]
+    finally:
+        runner_module.manage_subprocess = original_manage  # type: ignore[assignment]
+        runner_module.drain_stderr = original_drain  # type: ignore[assignment]
+
+    notes = [
+        evt
+        for evt in events
+        if isinstance(evt, ActionEvent) and "retrying in" in (evt.action.title or "")
+    ]
+    completions = [evt for evt in events if isinstance(evt, CompletedEvent)]
+    started = [evt for evt in events if isinstance(evt, StartedEvent)]
+    assert len(started) == 1  # only one spawn
+    assert len(notes) == 0  # no retry note
+    assert len(completions) == 1
+    assert completions[0].error is not None
+    assert "temporarily unavailable" in completions[0].error
+
+
+@pytest.mark.anyio
+async def test_non_transient_failure_not_retried(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original_manage = runner_module.manage_subprocess
+    original_drain = runner_module.drain_stderr
+    try:
+        runner = _make_attempt_runner(
+            [
+                ([], 1, ["auth failed: unauthorized"]),
+            ]
+        )
+        events = [evt async for evt in runner.run_impl("hello", None)]
+    finally:
+        runner_module.manage_subprocess = original_manage  # type: ignore[assignment]
+        runner_module.drain_stderr = original_drain  # type: ignore[assignment]
+
+    notes = [
+        evt
+        for evt in events
+        if isinstance(evt, ActionEvent) and evt.action.kind == "warning"
+    ]
+    completions = [evt for evt in events if isinstance(evt, CompletedEvent)]
+    # One retry-note comes from process_error_events (the "failed rc=1" note),
+    # but zero retry-backoff notes.
+    assert not any("retrying in" in n.action.title for n in notes)
+    assert len(completions) == 1
+    assert completions[0].ok is False
+
+
+@pytest.mark.anyio
+async def test_cancellation_during_backoff_aborts(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original_manage = runner_module.manage_subprocess
+    original_drain = runner_module.drain_stderr
+    try:
+        blob = (
+            'Internal error: {"message": "status 503 temporarily unavailable", '
+            '"http_status": 503}'
+        )
+        runner = _make_attempt_runner(
+            [
+                ([], 1, [blob]),
+                (
+                    [b'{"type": "completed", "ok": true, "answer": "ok"}'],
+                    0,
+                    [],
+                ),
+            ]
+        )
+        runner.retry_base_delay_s = 10.0  # long backoff to cancel into
+
+        with anyio.move_on_after(0.3):
+            events = [evt async for evt in runner.run_impl("hello", None)]
+            # If it completed without cancellation, there should be no second spawn.
+            completions = [e for e in events if isinstance(e, CompletedEvent)]
+            assert len(completions) <= 1
+    finally:
+        runner_module.manage_subprocess = original_manage  # type: ignore[assignment]
+        runner_module.drain_stderr = original_drain  # type: ignore[assignment]

@@ -126,3 +126,61 @@ async def test_drain_stderr_start_soon_accepts_positional_args() -> None:
 
     async with anyio.create_task_group() as tg:
         tg.start_soon(runner._drain_stderr_capture, recv, state, "agy")
+
+
+@pytest.mark.anyio
+async def test_run_impl_transient_stderr_clean_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A transient 503 on agy stderr must produce a clean error, no raw JSON."""
+    from takopi.model import CompletedEvent, StartedEvent
+
+    blob = (
+        'Internal error: {"message": "API error (status 503): '
+        'capacity temporarily unavailable. Retry shortly.", '
+        '"http_status": 503}'
+    )
+
+    class _FakeProc:
+        def __init__(self) -> None:
+            self.stdout = object()
+            self.stderr = object()
+            self.stdin = None
+            self.pid = 42
+
+        async def wait(self) -> int:
+            return 1
+
+    class _FakeManager:
+        async def __aenter__(self):
+            return _FakeProc()
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+    runner = AgyRunner(agy_cmd="agy")
+
+    async def fake_collect_stdout(self, stdout):
+        return ""
+
+    monkeypatch.setattr(
+        agy_runner, "manage_subprocess", lambda *a, **kw: _FakeManager()
+    )
+    monkeypatch.setattr(AgyRunner, "_collect_stdout", fake_collect_stdout)
+
+    # Seed stderr_tail via the drain path: simulate the capture.
+    async def fake_drain(self, stream, state, tag):
+        state.stderr_tail.append(blob)
+
+    monkeypatch.setattr(AgyRunner, "_drain_stderr_capture", fake_drain)
+
+    events = [evt async for evt in runner.run_impl("hello", None)]
+    started = [e for e in events if isinstance(e, StartedEvent)]
+    completed = [e for e in events if isinstance(e, CompletedEvent)]
+    assert len(started) == 1
+    assert len(completed) == 1
+    assert completed[0].ok is False
+    assert completed[0].error is not None
+    assert "temporarily unavailable" in completed[0].error
+    assert "{" not in completed[0].error
+    assert "Internal error" not in completed[0].error

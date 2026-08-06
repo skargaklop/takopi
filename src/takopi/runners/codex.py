@@ -26,6 +26,10 @@ from .run_options import get_run_options
 from ..schemas import codex as codex_schema
 from ..utils.paths import get_run_base_dir, relativize_command
 from ..utils.streams import drain_stderr, iter_bytes_lines
+from ..utils.transient_failures import (
+    classify_transient_failure,
+    format_transient_failure,
+)
 from ..utils.subprocess import (
     close_process_streams,
     kill_process_tree,
@@ -1339,9 +1343,16 @@ def _translate_app_notification(
                     resume=resume,
                 )
             ]
+        final_error = error_message or str(status or "turn failed")
+        # Substitute a clean message for transient upstream failures.
+        # App-server turns already crossed the side-effect boundary
+        # (thread_start/turn_start + StartedEvent), so no retry here.
+        failure = classify_transient_failure(final_error)
+        if failure is not None:
+            final_error = format_transient_failure(ENGINE, failure)
         return [
             factory.completed_error(
-                error=error_message or str(status or "turn failed"),
+                error=final_error,
                 answer=state.final_answer or "",
                 resume=resume,
             )

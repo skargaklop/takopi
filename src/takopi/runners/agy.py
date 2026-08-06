@@ -23,6 +23,10 @@ from ..runner import BaseRunner, ResumeTokenMixin, Runner
 from ._compact_mixin import HandoffCompactMixin
 from ..utils.paths import get_run_base_dir
 from ..utils.streams import iter_bytes_lines
+from ..utils.transient_failures import (
+    classify_transient_failure,
+    format_transient_failure,
+)
 from ..utils.subprocess import manage_subprocess
 from .modes import run_modes
 from .run_options import get_run_options
@@ -274,6 +278,19 @@ class AgyRunner(HandoffCompactMixin, ResumeTokenMixin, BaseRunner):
             error = None if ok else f"agy failed (rc={rc})."
             if not ok and not answer and state.stderr_tail:
                 answer = "\n".join(state.stderr_tail[-20:])
+
+            # Classify transient upstream failures from stderr for a clean
+            # user-facing message. Agy emits StartedEvent early (session lock),
+            # so it is intentionally never auto-retried: the side-effect
+            # boundary was already crossed.
+            if not ok:
+                stderr_text = "\n".join(state.stderr_tail)
+                failure = classify_transient_failure(stderr_text)
+                if failure is not None:
+                    error = format_transient_failure(ENGINE, failure)
+                    # Do not surface the raw stderr blob as the answer.
+                    if not answer.strip():
+                        answer = ""
 
             completed = CompletedEvent(
                 engine=ENGINE,

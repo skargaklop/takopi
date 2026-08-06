@@ -499,3 +499,62 @@ async def test_app_server_client_stop_kills_process_tree(tmp_path: Path) -> None
     assert not _is_process_alive(child_pid), (
         f"child {child_pid} survived app-server stop()"
     )
+
+
+def test_translate_app_notification_transient_error_clean_message() -> None:
+    """A transient 503 in turn/completed error must yield a clean message."""
+    from takopi.model import ResumeToken
+
+    from takopi.runners.codex import _translate_app_notification
+
+    state = _AppServerRunState(factory=EventFactory("codex"))
+    resume = ResumeToken(engine="codex", value="thread-1")
+    blob = (
+        'Internal error: {"message": "API error (status 503): '
+        'capacity temporarily unavailable. Retry shortly.", '
+        '"http_status": 503}'
+    )
+    message = {
+        "method": "turn/completed",
+        "params": {
+            "threadId": "thread-1",
+            "turn": {
+                "id": "turn-1",
+                "status": "failed",
+                "error": {"message": blob},
+            },
+        },
+    }
+    events = _translate_app_notification(message, state=state, resume=resume)
+    completed = [e for e in events if isinstance(e, CompletedEvent)]
+    assert len(completed) == 1
+    assert completed[0].ok is False
+    assert completed[0].error is not None
+    assert "temporarily unavailable" in completed[0].error
+    assert "{" not in completed[0].error
+    assert "Internal error" not in completed[0].error
+
+
+def test_translate_app_notification_non_transient_error_preserved() -> None:
+    """A non-transient error must pass through unchanged."""
+    from takopi.model import ResumeToken
+
+    from takopi.runners.codex import _translate_app_notification
+
+    state = _AppServerRunState(factory=EventFactory("codex"))
+    resume = ResumeToken(engine="codex", value="thread-1")
+    message = {
+        "method": "turn/completed",
+        "params": {
+            "threadId": "thread-1",
+            "turn": {
+                "id": "turn-1",
+                "status": "failed",
+                "error": {"message": "authentication failed"},
+            },
+        },
+    }
+    events = _translate_app_notification(message, state=state, resume=resume)
+    completed = [e for e in events if isinstance(e, CompletedEvent)]
+    assert len(completed) == 1
+    assert completed[0].error == "authentication failed"

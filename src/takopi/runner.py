@@ -7,8 +7,8 @@ import json
 import re
 import subprocess
 from collections.abc import AsyncIterator, Callable
-from dataclasses import dataclass
-from typing import Any, Protocol, cast
+from dataclasses import dataclass, replace
+from typing import Any, NamedTuple, Protocol, cast
 from weakref import WeakValueDictionary
 
 import anyio
@@ -26,6 +26,10 @@ from .model import (
 )
 from .utils.paths import get_run_base_dir
 from .utils.streams import drain_stderr, iter_bytes_lines
+from .utils.transient_failures import (
+    classify_transient_failure,
+    format_transient_failure,
+)
 from .utils.subprocess import manage_subprocess
 
 
@@ -151,6 +155,13 @@ def _safe_preview(prompt: str, max_len: int = 60) -> str:
     return preview[:max_len] + ("…" if len(preview) > max_len else "")
 
 
+def _format_delay(delay: float) -> str:
+    """Format a backoff delay without a trailing ``.0`` for integral values."""
+    if delay == int(delay):
+        return str(int(delay))
+    return str(delay)
+
+
 @dataclass(slots=True)
 class JsonlRunState:
     note_seq: int = 0
@@ -165,9 +176,28 @@ class JsonlStreamState:
     jsonl_seq: int = 0
 
 
+class AttemptBatch(NamedTuple):
+    """One batch of events from a single subprocess attempt.
+
+    Stream events arrive as single-event batches with ``rc=None``. A terminal
+    batch (no stream completion was emitted) carries empty events, the raw
+    stderr text, the process exit code, and ``pid`` for log correlation. The
+    retry loop classifies the terminal batch before calling
+    ``process_error_events`` so generic failure notes do not pollute the
+    side-effect safety counters.
+    """
+
+    events: tuple[TakopiEvent, ...]
+    stderr: str
+    pid: int
+    rc: int | None = None
+
+
 class JsonlSubprocessRunner(BaseRunner):
     startup_timeout_s: float | None = None
     idle_timeout_s: float | None = None
+    retry_max_attempts: int = 3
+    retry_base_delay_s: float = 5.0
 
     def get_logger(self) -> Any:
         return getattr(self, "logger", get_logger(__name__))
@@ -684,27 +714,25 @@ class JsonlSubprocessRunner(BaseRunner):
                 error="startup timeout",
             )
 
-    async def run_impl(
-        self, prompt: str, resume: ResumeToken | None
-    ) -> AsyncIterator[TakopiEvent]:
-        state = self.new_state(prompt, resume)
-        self.start_run(prompt, resume, state=state)
+    async def _run_single_attempt(
+        self,
+        prompt: str,
+        resume: ResumeToken | None,
+        *,
+        state: Any,
+        logger: Any,
+    ) -> AsyncIterator[AttemptBatch]:
+        """Run one subprocess attempt, yielding event batches.
 
-        tag = self.tag()
-        logger = self.get_logger()
+        Stream events arrive as single-event batches with ``rc=None``. When the
+        subprocess exits without a terminal stream completion, one final batch
+        is yielded with empty ``events``, the raw ``stderr``, the exit code,
+        and ``pid``; the caller classifies it before deciding retry vs emit.
+        """
         cmd = [self.command(), *self.build_args(prompt, resume, state=state)]
         payload = self.stdin_payload(prompt, resume, state=state)
         env = self.env(state=state)
-        logger.info(
-            "runner.start",
-            engine=self.engine,
-            resume=resume.value if resume else None,
-            prompt=prompt,
-            prompt_len=len(prompt),
-            prompt_sha256=_prompt_fingerprint(prompt),
-            prompt_preview=_safe_preview(prompt),
-        )
-
+        tag = self.tag()
         cwd = get_run_base_dir()
 
         async with manage_subprocess(
@@ -731,6 +759,7 @@ class JsonlSubprocessRunner(BaseRunner):
 
             rc: int | None = None
             stream = JsonlStreamState(expected_session=resume)
+            stderr_capture: list[str] = []
 
             async with anyio.create_task_group() as tg:
                 tg.start_soon(
@@ -738,6 +767,7 @@ class JsonlSubprocessRunner(BaseRunner):
                     proc.stderr,
                     logger,
                     tag,
+                    stderr_capture,
                 )
                 async for evt in self._iter_jsonl_events(
                     stdout=proc.stdout,
@@ -749,46 +779,249 @@ class JsonlSubprocessRunner(BaseRunner):
                     startup_timeout_s=self.startup_timeout_s,
                     idle_timeout_s=self.idle_timeout_s,
                 ):
-                    yield evt
+                    yield AttemptBatch(events=(evt,), stderr="", pid=proc.pid)
 
                 rc = await proc.wait()
 
             logger.info("subprocess.exit", pid=proc.pid, rc=rc)
             if stream.did_emit_completed:
                 return
-            found_session = stream.found_session
-            if rc is not None and rc != 0:
-                events = self.process_error_events(
-                    rc,
+            yield AttemptBatch(
+                events=(),
+                stderr="\n".join(stderr_capture),
+                pid=proc.pid,
+                rc=rc,
+            )
+
+    async def run_impl(
+        self, prompt: str, resume: ResumeToken | None
+    ) -> AsyncIterator[TakopiEvent]:
+        logger = self.get_logger()
+        logger.info(
+            "runner.start",
+            engine=self.engine,
+            resume=resume.value if resume else None,
+            prompt=prompt,
+            prompt_len=len(prompt),
+            prompt_sha256=_prompt_fingerprint(prompt),
+            prompt_preview=_safe_preview(prompt),
+        )
+
+        max_attempts = max(1, int(self.retry_max_attempts))
+        base_delay = float(self.retry_base_delay_s)
+        engine = self.engine
+        found_session: ResumeToken | None = None
+
+        for attempt in range(1, max_attempts + 1):
+            state = self.new_state(prompt, resume)
+            self.start_run(prompt, resume, state=state)
+
+            started_emitted = False
+            action_emitted = False
+            answer_emitted = False
+            held_failure: CompletedEvent | None = None
+            held_pid = 0
+            terminal_rc: int | None = None
+            terminal_stderr = ""
+            settled = False
+
+            async for batch in self._run_single_attempt(
+                prompt, resume, state=state, logger=logger
+            ):
+                pid = batch.pid
+                if batch.events:
+                    for evt in batch.events:
+                        if isinstance(evt, StartedEvent):
+                            started_emitted = True
+                            found_session = evt.resume
+                            yield evt
+                        elif isinstance(evt, ActionEvent):
+                            action_emitted = True
+                            yield evt
+                        elif isinstance(evt, CompletedEvent):
+                            if evt.ok:
+                                self._log_completed_event(
+                                    logger=logger,
+                                    pid=pid,
+                                    event=evt,
+                                )
+                                yield evt
+                                settled = True
+                                continue
+                            # Failed stream completion: classify for clean error.
+                            failure = classify_transient_failure(
+                                evt.error or batch.stderr
+                            )
+                            if failure is not None:
+                                evt = replace(
+                                    evt,
+                                    error=format_transient_failure(engine, failure),
+                                )
+                            # Side effects make replay unsafe: emit immediately.
+                            if (
+                                failure is None
+                                or started_emitted
+                                or action_emitted
+                                or evt.answer.strip()
+                            ):
+                                answer_emitted = (
+                                    bool(evt.answer.strip()) or answer_emitted
+                                )
+                                self._log_completed_event(
+                                    logger=logger,
+                                    pid=pid,
+                                    event=evt,
+                                )
+                                yield evt
+                                settled = True
+                            else:
+                                held_failure = evt
+                                held_pid = pid
+                        else:
+                            yield evt
+                else:
+                    # Terminal batch: process exited without a stream completion.
+                    terminal_rc = batch.rc
+                    terminal_stderr = batch.stderr
+
+            if settled:
+                return
+
+            # Build terminal failure events. A held stream failure
+            # (CompletedEvent from the stream itself) takes precedence over
+            # a raw-exit failure. The terminal events list may include
+            # synthetic StartedEvents and notes from runner overrides
+            # (e.g. GrokRunner.process_error_events).
+            terminal_events: list[TakopiEvent] = []
+            if held_failure is not None:
+                terminal_events = [held_failure]
+            elif terminal_rc is not None and terminal_rc != 0:
+                terminal_events = self._terminal_failure_events(
+                    rc=terminal_rc,
+                    stderr=terminal_stderr,
                     resume=resume,
                     found_session=found_session,
                     state=state,
+                    engine=engine,
+                    logger=logger,
+                    pid=held_pid,
                 )
-                for evt in events:
-                    if isinstance(evt, CompletedEvent):
-                        self._log_completed_event(
-                            logger=logger,
-                            pid=proc.pid,
-                            event=evt,
-                            source="process_error",
-                        )
-                    yield evt
-                return
+            else:
+                terminal_events = self._stream_end_failure_events(
+                    resume=resume,
+                    found_session=found_session,
+                    state=state,
+                    logger=logger,
+                    pid=held_pid,
+                )
 
-            events = self.stream_end_events(
-                resume=resume,
-                found_session=found_session,
-                state=state,
+            # Extract the CompletedEvent for classification.
+            combined = next(
+                (e for e in terminal_events if isinstance(e, CompletedEvent)),
+                None,
             )
-            for evt in events:
+            if combined is None:
+                combined = CompletedEvent(
+                    engine=engine,
+                    ok=False,
+                    answer="",
+                    resume=found_session or resume,
+                    error=f"{engine} failed without a result event",
+                )
+                terminal_events.append(combined)
+
+            can_retry = (
+                attempt < max_attempts
+                and not started_emitted
+                and not action_emitted
+                and not answer_emitted
+                and classify_transient_failure(combined.error or terminal_stderr)
+                is not None
+            )
+
+            if can_retry:
+                failure = classify_transient_failure(combined.error or terminal_stderr)
+                assert failure is not None  # can_retry guarantees it
+                delay = base_delay * attempt
+                status = (
+                    f" (HTTP {failure.http_status})"
+                    if failure.http_status in (429, 503)
+                    else ""
+                )
+                yield self.note_event(
+                    f"{engine} upstream busy{status}; "
+                    f"retrying in {_format_delay(delay)}s "
+                    f"(attempt {attempt + 1}/{max_attempts})",
+                    state=state,
+                )
+                await anyio.sleep(delay)
+                continue
+
+            # Exhausted or non-transient: emit all terminal events
+            # (StartedEvent, notes, then the CompletedEvent).
+            for evt in terminal_events:
                 if isinstance(evt, CompletedEvent):
                     self._log_completed_event(
                         logger=logger,
-                        pid=proc.pid,
+                        pid=held_pid,
                         event=evt,
-                        source="stream_end",
                     )
                 yield evt
+            return
+
+    def _terminal_failure_events(
+        self,
+        *,
+        rc: int,
+        stderr: str,
+        resume: ResumeToken | None,
+        found_session: ResumeToken | None,
+        state: Any,
+        engine: str,
+        logger: Any,
+        pid: int,
+    ) -> list[TakopiEvent]:
+        """Build terminal failure events for a nonzero raw-exit failure.
+
+        Delegates to ``process_error_events`` (which runners like Grok override
+        to emit a synthetic ``StartedEvent``), then replaces the
+        ``CompletedEvent`` error with a clean message when the stderr is a
+        transient upstream failure.
+        """
+        events = self.process_error_events(
+            rc,
+            resume=resume,
+            found_session=found_session,
+            state=state,
+        )
+        failure = classify_transient_failure(stderr)
+        if failure is None:
+            return events
+        clean = format_transient_failure(engine, failure)
+        # For transient failures, suppress the generic "failed (rc=N)" note
+        # (the user already saw retry notes) but keep StartedEvent and the
+        # CompletedEvent with a clean message.
+        return [
+            replace(evt, error=clean) if isinstance(evt, CompletedEvent) else evt
+            for evt in events
+            if not isinstance(evt, ActionEvent)
+        ]
+
+    def _stream_end_failure_events(
+        self,
+        *,
+        resume: ResumeToken | None,
+        found_session: ResumeToken | None,
+        state: Any,
+        logger: Any,
+        pid: int,
+    ) -> list[TakopiEvent]:
+        """Build terminal failure events for the stream-end (rc==0) path."""
+        return self.stream_end_events(
+            resume=resume,
+            found_session=found_session,
+            state=state,
+        )
 
 
 class Runner(Protocol):
