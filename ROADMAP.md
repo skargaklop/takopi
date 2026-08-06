@@ -124,7 +124,7 @@ Takopi cannot currently direct an agent to use a specific subagent or skill for 
 
 ---
 
-## Task 4: New Agent Support — Droid, Cline, Kilo
+## Task 4: New Agent Support — Droid, Cline, Kilo, Warp, Open Interpreter
 
 ### Overview
 
@@ -557,7 +557,7 @@ Live evidence 2026-08-06, AFTER the Task 12 rebuild: a `/plan` grok run still en
 
 ---
 
-## Task 16: Grok Native Plan Mode Without Cancellations (Hard-Enforcement Probe)
+## Task 16: Grok Native Plan Mode Without Cancellations (Hard-Enforcement Probe) — DONE
 
 ### Problem
 
@@ -571,18 +571,24 @@ User question 2026-08-06: keep native `--permission-mode plan` (hard read-only g
 4. The Task 15 salvage net stays as the last defense line regardless.
 5. Task 15 must be committed FIRST (safe baseline) before Task 16 experimentation begins.
 
+### Outcome
+
+**Winner: D2 — `--permission-mode plan` + `--tools read_file,list_dir,grep,web_search`.**
+
+Probes ran beyond the original C1-C5 matrix (added D1-D5 with the `--tools` allow-list angle). The allow-list makes mutating tools physically absent, so the agent cannot trigger an approval prompt, so no cancellation occurs. `stopReason=end_turn`, no file written, plan text delivered. The deny-list (`--disallowed-tools`) and `--always-approve` approaches both failed (the agent still invokes the tool, triggering the cancel). `bypassPermissions` + allow-list also works but is slower (agent loops on `search_tool`). D2 is the clean winner.
+
+Implemented: grok `build_args` plan mode emits native `--permission-mode plan` + `_PLAN_READONLY_TOOLS` allow-list. Salvage net retained. Docs updated with the full probe matrix.
+
 ### Plan
 
 - `docs/plans/2026-08-06-grok-plan-hard-enforcement-probe.md` - approved spec.
 
 ### Scope
 
-- `src/takopi/runners/grok.py` (only if a winner exists)
-- `tests/test_grok_runner.py`, (conditional) `test_plan_goal_modes.py`
-- `docs/reference/runners/grok/probes/*.jsonl`, `plan-hard-enforcement.md`
+- `src/takopi/runners/grok.py`
+- `tests/test_grok_runner.py`, `test_plan_goal_modes.py`
+- `docs/reference/runners/grok/probes/*.jsonl`, `plan-mode-cancel.md`, `runner.md`
 - `changelog.md`
-
----
 
 ## Workflow Convention
 

@@ -270,15 +270,17 @@ def test_grok_plan_permission_mode_no_yolo() -> None:
     )
     with apply_run_options(EngineRunOptions(plan=True)):
         args = runner.build_args("plan the refactor", None, state=state)
-    # Path B: soft-plan prefix instead of native --permission-mode plan.
-    assert "--permission-mode" not in args
+    # Task 16: native --permission-mode plan + read-only --tools allow-list.
+    # Mutating tools are physically absent -> no approval prompt -> no cancel.
+    assert "--permission-mode" in args
+    assert args[args.index("--permission-mode") + 1] == "plan"
     assert "--yolo" not in args
+    assert "--tools" in args
+    tools_val = args[args.index("--tools") + 1]
+    assert "write" not in tools_val
+    assert "read_file" in tools_val
     # plan_mode flag is set for the salvage safety net.
     assert state.plan_mode is True
-    # The prompt carries the soft-plan read-only prefix.
-    prompt_val = args[args.index("-p") + 1]
-    assert "plan mode" in prompt_val.lower()
-    assert "read-only" in prompt_val.lower()
 
 
 def test_grok_goal_prefixes_prompt() -> None:

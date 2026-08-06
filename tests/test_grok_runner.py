@@ -1058,11 +1058,12 @@ def test_non_plan_cancelled_unchanged_by_salvage() -> None:
     assert completed.error == "grok run stopped (cancelled)"
 
 
-def test_plan_mode_build_args_uses_soft_plan_not_permission_mode() -> None:
-    """Path B: plan-mode build_args uses soft-plan prefix, NOT --permission-mode plan.
+def test_plan_mode_build_args_uses_native_plan_and_readonly_tools() -> None:
+    """Task 16: plan-mode build_args emits native --permission-mode plan AND
+    a read-only --tools allow-list. Mutating tools are physically absent so
+    the agent cannot trigger an approval prompt -> no cancellation.
 
-    Grok switches from native read-only enforcement to the shared soft-plan
-    prompt prefix (like codex/omp/opencode). No --permission-mode flag.
+    Proven by probe D2 (end_turn, no file, text delivered).
     """
     runner = GrokRunner(grok_cmd="grok", yolo=True)
     session_id = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
@@ -1075,12 +1076,18 @@ def test_plan_mode_build_args_uses_soft_plan_not_permission_mode() -> None:
 
     # plan_mode flag is set for salvage purposes.
     assert state.plan_mode is True
-    # No native permission-mode flag.
-    assert "--permission-mode" not in args
-    # The prompt is the soft-plan prefix variant (contains read-only instruction).
-    prompt_val = args[args.index("-p") + 1]
-    assert "plan mode" in prompt_val.lower()
-    assert "read-only" in prompt_val.lower()
+    # Native permission-mode plan IS used (hard enforcement).
+    assert "--permission-mode" in args
+    assert args[args.index("--permission-mode") + 1] == "plan"
+    # Read-only tools allow-list restricts the toolset.
+    assert "--tools" in args
+    tools_val = args[args.index("--tools") + 1]
+    for mutating in ("write", "search_replace", "run_terminal_command", "todo_write"):
+        assert mutating not in tools_val, f"{mutating} must be excluded in plan mode"
+    for readonly in ("read_file", "list_dir", "grep"):
+        assert readonly in tools_val, f"{readonly} must be present in plan mode"
+    # --yolo is NOT used in plan mode (no auto-approve needed).
+    assert "--yolo" not in args
 
 
 def test_plan_cancel_replay_from_capture_fixture_salvages() -> None:

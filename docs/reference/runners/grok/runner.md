@@ -32,29 +32,31 @@ Telegram automation cannot answer interactive tool prompts. Takopi defaults `yol
 
 ## Plan mode
 
-Grok uses the **shared soft-plan prompt prefix** (Path B) instead of
-native `--permission-mode plan`. The native flag caused spurious turn
-cancellations: in headless mode the harness cannot answer interactive
-approval prompts, so any write/execute attempt cancelled the entire turn
-with `stopReason=cancelled`. The soft-plan prefix instructs the agent to
-work in read-only planning mode at the prompt level — same approach used
-by codex, omp, opencode, and pi (fallback).
+Grok keeps native `--permission-mode plan` AND restricts the toolset to a
+read-only allow-list: `--tools read_file,list_dir,grep,web_search`. This
+combination eliminates the spurious turn cancellations that pure
+`--permission-mode plan` caused in headless mode.
 
-**Trade-off:** soft-plan drops the hard read-only guarantee. The agent is
-*instructed* not to write/execute but is not physically prevented from
-doing so. This is acceptable for a headless Telegram bridge (the agent
-runs with `--yolo` in non-plan mode anyway; every other runner already
-uses soft-plan).
+**How it works:** in plan mode, mutating tools (`write`,
+`search_replace`, `run_terminal_command`, `todo_write`) are physically
+absent from the agent's toolset. The agent cannot call a tool that
+requires approval, so no approval prompt fires, and the harness never
+cancels the turn (`stopReason=end_turn` instead of `cancelled`).
 
-**Salvage safety net:** if a plan-mode run still ends with
-`stopReason=cancelled` for any reason (upstream abort, timeout), and
-plan text was produced, the plan is delivered as a soft success with the
-note "turn ended by plan-mode enforcement; nothing was executed" instead
-of an opaque error. A plan-mode cancel with no plan text keeps the honest
-error message.
+**Why allow-list not deny-list:** a deny-list must enumerate every
+mutating tool and is fail-open (a missed name silently allows writes).
+An allow-list is fail-closed: only explicitly-listed read-only tools are
+available.
+
+**Salvage safety net:** `plan_mode=True` is still set on `GrokStreamState`.
+If a plan-mode run ever ends with `stopReason=cancelled` for any other
+reason (upstream abort, timeout) and plan text was produced, the plan is
+delivered as a soft success with the note "turn ended by plan-mode
+enforcement; nothing was executed" instead of an opaque error. A
+plan-mode cancel with no plan text keeps the honest error message.
 
 See [plan-mode-cancel.md](plan-mode-cancel.md) for the full trigger
-classification and path-selection rationale.
+classification, probe matrix, and path-selection rationale.
 
 ## Config
 

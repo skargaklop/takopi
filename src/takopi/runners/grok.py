@@ -24,6 +24,17 @@ from .tool_actions import tool_kind_and_title
 
 logger = get_logger(__name__)
 
+# Read-only tools allow-list for plan mode. Combined with
+# --permission-mode plan, mutating tools are physically ABSENT from the
+# agent's toolset, so no approval prompt can fire and no cancellation
+# occurs. Proven by Task 16 probes (D2: end_turn, no file, text delivered).
+#
+# Built-in tools observed in grok captures: run_terminal_command,
+# read_file, search_replace, list_dir, grep, todo_write, write, web_search.
+# The allow-list keeps read/explore/search tools and drops all mutating
+# tools (write, search_replace, run_terminal_command, todo_write).
+_PLAN_READONLY_TOOLS = "read_file,list_dir,grep,web_search"
+
 # Salvage note appended when a plan-mode cancellation is converted to a
 # soft success because plan content was produced.
 _PLAN_CANCEL_SALVAGE_NOTE = "turn ended by plan-mode enforcement; nothing was executed"
@@ -401,11 +412,12 @@ def translate_grok_event(
 class GrokRunner(HandoffCompactMixin, ResumeTokenMixin, JsonlSubprocessRunner):
     engine: EngineId = ENGINE
     resume_re: re.Pattern[str] = _RESUME_RE
-    # Plan mode uses the shared soft-plan prompt prefix (Path B) instead of
-    # native --permission-mode plan, which caused spurious cancellations when
-    # the agent attempted writes/executes in headless mode. The plan_mode flag
-    # is still set on state so the salvage net can recover plan content.
-    plan_enforcement: str = "soft"
+    # Plan mode keeps native --permission-mode plan AND restricts the
+    # toolset to a read-only allow-list (--tools). Mutating tools are
+    # physically absent, so no approval prompt fires and no cancellation
+    # occurs (Task 16 probe D2: end_turn, no file, text delivered).
+    # plan_enforcement is reserved for future tunability.
+    plan_enforcement: str = "allowlist"
 
     grok_cmd: str = "grok"
     model: str | None = None
@@ -438,18 +450,30 @@ class GrokRunner(HandoffCompactMixin, ResumeTokenMixin, JsonlSubprocessRunner):
     ) -> list[str]:
         run_options = get_run_options()
         plan, _goal = run_modes(run_options)
-        prompt = effective_prompt(prompt, soft_plan=True, options=run_options)
         args: list[str] = [*self.extra_args]
-        args.extend(["-p", prompt])
         args.extend(["--output-format", "streaming-json"])
 
         if plan:
-            # Path B: soft-plan prefix instead of native --permission-mode plan.
-            # The plan_mode flag is still set so the salvage net can fire
-            # if a cancellation occurs for any reason (upstream abort, etc.).
+            # Hard enforcement: native --permission-mode plan + read-only
+            # tools allow-list. Mutating tools are physically absent so the
+            # agent cannot trigger an approval prompt -> no cancellation.
+            # The plan_mode flag is still set on state so the salvage net can
+            # fire if a cancellation occurs for any other reason (upstream
+            # abort, timeout, etc.).
             state.plan_mode = True
+            args.extend(["--permission-mode", "plan"])
+            args.extend(["--tools", _PLAN_READONLY_TOOLS])
+            prompt = effective_prompt(prompt, soft_plan=True, options=run_options)
         elif self.yolo is True:
             args.append("--yolo")
+
+        # effective_prompt handles goal mode (/goal prefix) and plan mode
+        # (soft-plan prefix). With soft_plan=True it is a no-op outside plan
+        # mode; goal mode is applied regardless.
+        if not plan:
+            prompt = effective_prompt(prompt, soft_plan=False, options=run_options)
+
+        args.extend(["-p", prompt])
 
         model = self.model
         if run_options is not None and run_options.model:
@@ -466,13 +490,16 @@ class GrokRunner(HandoffCompactMixin, ResumeTokenMixin, JsonlSubprocessRunner):
         if run_options is not None and run_options.subagent:
             args.extend(["--agent", str(run_options.subagent)])
 
-        tools = _coerce_comma_list(self.tools)
-        if tools is not None:
-            args.extend(["--tools", tools])
+        # In plan mode the allow-list is fixed to _PLAN_READONLY_TOOLS.
+        # Outside plan mode, honor the user-configured tools/disallowed-tools.
+        if not plan:
+            tools = _coerce_comma_list(self.tools)
+            if tools is not None:
+                args.extend(["--tools", tools])
 
-        disallowed = _coerce_comma_list(self.disallowed_tools)
-        if disallowed is not None:
-            args.extend(["--disallowed-tools", disallowed])
+            disallowed = _coerce_comma_list(self.disallowed_tools)
+            if disallowed is not None:
+                args.extend(["--disallowed-tools", disallowed])
 
         if self.max_turns is not None:
             args.extend(["--max-turns", str(self.max_turns)])

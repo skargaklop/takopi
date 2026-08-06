@@ -50,49 +50,74 @@ would need manual allowlisting, and a missed tool name silently allows
 the write. This trades reliability for a maintenance burden that doesn't
 hold up in practice.
 
-## Chosen enforcement path: **Path B (soft-plan prefix)**
+## Chosen enforcement path: **native plan mode + read-only allow-list**
 
-Grok plan mode switches from native `--permission-mode plan` to the
-shared soft-plan prompt prefix (same approach used by codex, omp, and
-opencode). This eliminates harness-enforced read-only entirely:
+Grok plan mode keeps native `--permission-mode plan` AND restricts the
+toolset to a read-only allow-list via `--tools read_file,list_dir,grep,web_search`.
+This solves the cancellation problem at its root:
 
-- No `--permission-mode plan` flag → no forbidden-op cancellations.
-- The soft-plan prefix (`SOFT_PLAN_PREFIX` in `modes.py`) instructs
-  the agent to work in read-only planning mode at the prompt level.
-- `plan_mode=True` is still set on `GrokStreamState` so the salvage
-  safety net can fire if a cancellation ever slips through for any other
-  reason (upstream API failure, timeout, etc.).
+- Mutating tools (`write`, `search_replace`, `run_terminal_command`,
+  `todo_write`) are **physically absent** from the agent's toolset.
+- The agent cannot call a tool that requires approval, so no approval
+  prompt fires, so the harness never cancels the turn.
+- `stopReason=end_turn` — the agent produces its plan as text and ends
+  cleanly (proven by Task 16 probe D2).
 
-### Trade-off (documented)
+### Why this works (and the alternatives don't)
 
-**Soft-plan drops the hard read-only guarantee.** Under Path B the agent
-is *instructed* not to write/execute but is not *physically prevented*
-from doing so. This is acceptable because:
+The cancellation root cause is: `--permission-mode plan` denies mutating
+tools at the **approval layer**. In headless mode the harness cannot answer
+the interactive approval prompt, so it cancels the turn. Auto-approve flags
+(`--always-approve`) do **not** override plan-mode denial (probe D4:
+cancelled). Deny-lists (`--deny`, `--disallowed-tools`) don't prevent the
+call — the agent still invokes the tool and the denial triggers the same
+cancel (probe D5: cancelled via `run_terminal_command`).
 
-1. The agent operates with `--yolo` (auto-approve) in non-plan mode
-   anyway — there is no approval gate to protect in headless mode.
-2. Every other Takopi runner (codex, omp, opencode, pi-fallback) already
-   uses soft-plan with the same trade-off; grok was the outlier.
-3. The reliability gain (zero spurious cancellations) outweighs the
-   theoretical enforcement loss for a headless Telegram bridge.
-4. The salvage net (Task B below) provides a second layer of defense.
+The allow-list is the only mechanism that removes the tool **before** the
+agent can attempt it. With no mutating tool to call, there is no denial,
+no prompt, and no cancel.
 
-## Salvage safety net (Task B, implemented regardless of path)
+### Why an allow-list, not a deny-list?
 
-Even after switching to Path B, a plan-mode run could still end with
+A deny-list (`--disallowed-tools`) is fragile: every mutating tool name
+must be enumerated, and a missed name (or a new tool added in a grok CLI
+update) silently allows the write. An allow-list is fail-closed: only the
+explicitly listed read-only tools are available; everything else is absent
+by default.
+
+### Probe matrix (Task 16, 2026-08-06)
+
+Write-inducing prompt: "Create the file plan-probe.md ... then stop."
+
+| Case | Config | stopReason | File written | Text | Verdict |
+|------|--------|------------|-------------|------|---------|
+| **D2** | **plan + --tools readonly** | **end_turn** | **No** | **Yes** | **WIN** |
+| D1 | bypassPermissions + --tools readonly | end_turn | No | Yes | ok (slower: agent loops on search_tool) |
+| D3 | bypassPermissions + write in tools | end_turn | **Yes** | Yes | LOSE (read-only broken) |
+| D4 | plan + --always-approve | cancelled | No | No | FAIL (auto-approve doesn't override plan denial) |
+| D5 | default + --disallowed-tools | cancelled | No | No | FAIL (deny triggers same cancel) |
+
+**Winner: D2** — `--permission-mode plan --tools read_file,list_dir,grep,web_search`.
+
+### Trade-off
+
+The allow-list is a fixed set of built-in tools. If a future grok version
+adds a new read-only tool (e.g. a code-search tool), it would not be
+available in plan mode until the allow-list is updated. This is an
+acceptable, explicit trade-off for reliable hard enforcement. MCP tools
+are also excluded by the allow-list (they are not in the built-in set).
+
+## Salvage safety net (defense in depth)
+
+Even with the allow-list, a plan-mode run could still end with
 `stopReason=cancelled` for unrelated reasons (upstream API cancellation,
-timeout-induced abort, etc.). The salvage net converts such a
-cancellation into a usable outcome:
+timeout-induced abort, etc.). The salvage net converts such a cancellation
+into a usable outcome:
 
 - **Plan-mode cancel + non-empty trailing answer** → `ok=True` with the
   plan text delivered as the answer, plus the note
   "turn ended by plan-mode enforcement; nothing was executed".
-- **Plan-mode cancel + empty answer** → keeps the Task-12 honest error
-  message ("plan-mode turn cancelled by the harness...").
+- **Plan-mode cancel + empty answer** → keeps the honest error message.
 - **Non-plan cancellations** → unchanged (old "grok run stopped
   (cancelled)" message). A genuine user `/cancel` takes a different code
   path and is not masked.
-
-This distinguishes harness-side plan-mode aborts (via `plan_mode` flag +
-`stopReason == cancelled`) from user-initiated cancels, which never set
-`plan_mode=True`.
