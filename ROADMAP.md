@@ -677,8 +677,9 @@ undetected.
 
 1. `.github/workflows/ci.yml`: single workflow triggered on push + PR to
    `master`.
-2. Job matrix: Windows (primary target — the bot runs on Windows) and
-   Ubuntu (cross-platform sanity). Python 3.14.
+2. Job matrix: **Windows, macOS, and Linux** (cross-platform support is
+   mandatory — see Cross-Platform Support section). Runners:
+   `windows-latest`, `macos-latest`, `ubuntu-latest`. Python 3.14.
 3. Steps:
    - Checkout.
    - Install `uv` (astral-sh/setup-uv).
@@ -705,6 +706,8 @@ undetected.
 
 ## Workflow Convention
 
+All non-trivial tasks in this roadmap follow this sequence:
+
 ```
 1. Subagents gather documentation  →  save locally in docs/reference/
 2. Study existing takopi code       →  understand integration points
@@ -714,3 +717,25 @@ undetected.
 ```
 
 Never skip the documentation-gathering and plan-writing phases. The user requires evidence-based implementation, not speculation.
+
+## Cross-Platform Support (MANDATORY)
+
+Takopi MUST maintain full cross-platform support: **Windows, macOS, and
+Linux**. Every runner, subprocess wrapper, path handler, and platform
+conditional must work on all three operating systems. This is a hard
+constraint for all tasks:
+
+- **Runners:** every engine integration (grok, claude, codex, opencode,
+  omp, pi, agy) must work on all three platforms. Platform-specific
+  behavior (process groups, signals, paths) must use the existing
+  abstractions (`CREATE_NEW_PROCESS_GROUP` on Windows, `os.killpg` on
+  POSIX) — never assume a single OS.
+- **CI (Task 19):** the GitHub Actions matrix MUST cover all three
+  platforms — `windows-latest`, `macos-latest`, `ubuntu-latest`.
+- **Path handling:** use `pathlib.Path` and `os.path` abstractions; never
+  hardcode separators or assume a shell (`/bin/sh` vs PowerShell).
+- **Tests:** must pass on all three platforms. Platform-specific tests
+  must be explicitly marked (`@pytest.mark.skipif`) with the reason.
+- **Env:** `PYTHONUTF8=1` is needed on Windows; other platforms tolerate it.
+
+A feature that works on only one or two platforms is not done.
