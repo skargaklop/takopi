@@ -89,6 +89,11 @@ Takopi cannot currently direct an agent to use a specific subagent or skill for 
 
 - Per-engine config keys: `[codex] subagent = "..."`, `[claude] skill = "..."`.
 - Slash-command syntax: `/codex --subagent reviewer fix the bug` or `/claude --skill tdd write tests for X`.
+- Decision (user, 2026-08-05): skills are dynamic per user - skill selection uses free-form inline (`--skill <name>`) or slash (`/skill <name>`) forms only; no per-skill command registration, no static enumeration or validation in takopi; the harness resolves names against the user's own skill lis list. Amendment: the generic slash forms `/skill <name>` and `/subagent <name>` are equally supported (free-form args, NOT per-skill registered commands); bare `/skill <name>` sets the sticky session selection (`off` clears).
+
+### Plan
+
+- `docs/plans/2026-08-05-subagent-skill-selection.md` - approved spec (A0 docs via cheap-model read-only subagents; pilot engine first).
 - Per-session sticky selection: remember the chosen subagent/skill for the session until changed.
 
 ### Investigation Steps
