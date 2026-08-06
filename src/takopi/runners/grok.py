@@ -24,6 +24,16 @@ from .tool_actions import tool_kind_and_title
 
 logger = get_logger(__name__)
 
+# Salvage note appended when a plan-mode cancellation is converted to a
+# soft success because plan content was produced.
+_PLAN_CANCEL_SALVAGE_NOTE = "turn ended by plan-mode enforcement; nothing was executed"
+
+# Honest error for a plan-mode cancel with NO salvageable plan text.
+_PLAN_CANCEL_ERROR = (
+    "plan-mode turn cancelled by the harness "
+    "(attempted a forbidden write/execute in read-only mode)"
+)
+
 ENGINE: EngineId = "grok"
 
 _RESUME_RE = re.compile(
@@ -157,6 +167,25 @@ def _flush_text_segments(state: GrokStreamState, out: list[TakopiEvent]) -> str:
     answer = state.current_text
     state.current_text = ""
     return answer
+
+
+def _salvage_plan_answer(state: GrokStreamState, out: list[TakopiEvent]) -> str:
+    """Collect ALL text content for plan-mode salvage.
+
+    Unlike :func:`_flush_text_segments`, this does NOT emit narration as
+    separate note actions. Instead, it combines every text segment
+    (narration + trailing answer) into a single plan text, so the user
+    receives the full plan even when the agent attempted a write/execute
+    tool after producing it (which would otherwise close the plan text as
+    narration and leave the trailing answer empty).
+    """
+    _flush_pending_thought(state, out)
+    parts = [seg for seg in state.text_segments if seg.strip()]
+    if state.current_text.strip():
+        parts.append(state.current_text)
+    state.text_segments.clear()
+    state.current_text = ""
+    return "\n\n".join(parts)
 
 
 # Path keys for grok tool inputs (field names observed in real CLI captures).
@@ -294,11 +323,8 @@ def translate_grok_event(
             return out
 
         case grok_schema.StreamEndEvent():
-            # Flush narration segments before pending thoughts: the narration
-            # was closed by the thought that follows it, so it predates the
-            # pending thought block chronologically.
-            answer = _flush_text_segments(state, out)
-            _flush_pending_thought(state, out)
+            stop = (event.stopReason or "").lower()
+            is_cancel = stop in {"cancelled", "canceled"}
             session_id = event.sessionId or state.resume.value
             resume = ResumeToken(engine=ENGINE, value=session_id)
             # Keep factory resume aligned with the canonical token we started with
@@ -308,18 +334,31 @@ def translate_grok_event(
             usage = _usage_payload(event)
             if state.mid_stream_usage is not None:
                 usage["mid_stream_usage"] = state.mid_stream_usage
-            stop = (event.stopReason or "").lower()
-            ok = stop not in {"error", "aborted", "cancelled", "canceled"}
-            if not ok:
-                if state.plan_mode and stop in {"cancelled", "canceled"}:
-                    error = (
-                        "plan-mode turn cancelled by the harness "
-                        "(attempted a forbidden write/execute in read-only mode)"
-                    )
+
+            # Salvage path: plan-mode cancel with text content.
+            # When a plan-mode run is cancelled but plan text was produced,
+            # deliver the plan as a soft success instead of an opaque error.
+            # The plan text may be in narration segments (closed by the
+            # tool call that triggered the cancel) OR in the trailing answer.
+            if state.plan_mode and is_cancel:
+                answer = _salvage_plan_answer(state, out)
+                if answer.strip():
+                    ok = True
+                    error = None
+                    answer = f"{answer.rstrip()}\n\n{_PLAN_CANCEL_SALVAGE_NOTE}"
                 else:
-                    error = f"grok run stopped ({event.stopReason})"
+                    ok = False
+                    error = _PLAN_CANCEL_ERROR
             else:
-                error = None
+                # Normal path: flush narration as notes, trailing text = answer.
+                # Flush narration segments before pending thoughts: the narration
+                # was closed by the thought that follows it, so it predates the
+                # pending thought block chronologically.
+                answer = _flush_text_segments(state, out)
+                _flush_pending_thought(state, out)
+                ok = stop not in {"error", "aborted", "cancelled", "canceled"}
+                error = f"grok run stopped ({event.stopReason})" if not ok else None
+
             state.last_assistant_text = answer
             out.append(
                 state.factory.completed(
@@ -362,9 +401,11 @@ def translate_grok_event(
 class GrokRunner(HandoffCompactMixin, ResumeTokenMixin, JsonlSubprocessRunner):
     engine: EngineId = ENGINE
     resume_re: re.Pattern[str] = _RESUME_RE
-    # Native plan mode runs read-only (--permission-mode plan); the injection
-    # wording and cancellation messaging adapt accordingly.
-    plan_enforcement: str = "native_readonly"
+    # Plan mode uses the shared soft-plan prompt prefix (Path B) instead of
+    # native --permission-mode plan, which caused spurious cancellations when
+    # the agent attempted writes/executes in headless mode. The plan_mode flag
+    # is still set on state so the salvage net can recover plan content.
+    plan_enforcement: str = "soft"
 
     grok_cmd: str = "grok"
     model: str | None = None
@@ -397,14 +438,16 @@ class GrokRunner(HandoffCompactMixin, ResumeTokenMixin, JsonlSubprocessRunner):
     ) -> list[str]:
         run_options = get_run_options()
         plan, _goal = run_modes(run_options)
-        prompt = effective_prompt(prompt, soft_plan=False, options=run_options)
+        prompt = effective_prompt(prompt, soft_plan=True, options=run_options)
         args: list[str] = [*self.extra_args]
         args.extend(["-p", prompt])
         args.extend(["--output-format", "streaming-json"])
 
         if plan:
+            # Path B: soft-plan prefix instead of native --permission-mode plan.
+            # The plan_mode flag is still set so the salvage net can fire
+            # if a cancellation occurs for any reason (upstream abort, etc.).
             state.plan_mode = True
-            args.extend(["--permission-mode", "plan"])
         elif self.yolo is True:
             args.append("--yolo")
 

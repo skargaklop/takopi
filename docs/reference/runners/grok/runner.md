@@ -30,6 +30,32 @@ For **new** sessions Takopi pre-generates a UUID and passes `--session-id` so a 
 
 Telegram automation cannot answer interactive tool prompts. Takopi defaults `yolo = true` (`--yolo`). Explicit deny rules and PreToolUse hooks still apply on the Grok side.
 
+## Plan mode
+
+Grok uses the **shared soft-plan prompt prefix** (Path B) instead of
+native `--permission-mode plan`. The native flag caused spurious turn
+cancellations: in headless mode the harness cannot answer interactive
+approval prompts, so any write/execute attempt cancelled the entire turn
+with `stopReason=cancelled`. The soft-plan prefix instructs the agent to
+work in read-only planning mode at the prompt level — same approach used
+by codex, omp, opencode, and pi (fallback).
+
+**Trade-off:** soft-plan drops the hard read-only guarantee. The agent is
+*instructed* not to write/execute but is not physically prevented from
+doing so. This is acceptable for a headless Telegram bridge (the agent
+runs with `--yolo` in non-plan mode anyway; every other runner already
+uses soft-plan).
+
+**Salvage safety net:** if a plan-mode run still ends with
+`stopReason=cancelled` for any reason (upstream abort, timeout), and
+plan text was produced, the plan is delivered as a soft success with the
+note "turn ended by plan-mode enforcement; nothing was executed" instead
+of an opaque error. A plan-mode cancel with no plan text keeps the honest
+error message.
+
+See [plan-mode-cancel.md](plan-mode-cancel.md) for the full trigger
+classification and path-selection rationale.
+
 ## Config
 
 See [Config reference — grok](../../config.md#grok).

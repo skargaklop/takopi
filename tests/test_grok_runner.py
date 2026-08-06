@@ -957,3 +957,165 @@ def test_no_trailing_text_after_tool_answer_falls_back() -> None:
     completed = [e for e in events if isinstance(e, CompletedEvent)][0]
     # No text after the tool event -> empty answer.
     assert completed.answer == ""
+
+
+# ---------------------------------------------------------------------------
+# Task 15: plan-mode cancel prevention + salvage safety net
+# ---------------------------------------------------------------------------
+
+_PLAN_CANCEL_NOTE = "turn ended by plan-mode enforcement; nothing was executed"
+
+
+def test_plan_mode_cancelled_with_plan_text_salvages_to_ok() -> None:
+    """Salvage: plan-mode cancel WITH trailing plan text -> ok completion + note.
+
+    The plan is delivered as the answer; the enforcement note is appended.
+    Instead of an opaque error, the user gets a usable plan.
+    """
+    state = GrokStreamState(
+        resume=ResumeToken(engine=ENGINE, value="dddddddd-dddd-dddd-dddd-dddddddddddd"),
+        started=False,
+        plan_mode=True,
+    )
+    # Feed text (the plan) then the cancelled end.
+    events: list[TakopiEvent] = []
+    events.extend(
+        translate_grok_event(
+            grok_schema.decode_event(
+                b'{"type":"text","data":"## Plan\\nStep 1: Do thing."}'
+            ),
+            title="grok",
+            state=state,
+        )
+    )
+    events.extend(
+        translate_grok_event(
+            grok_schema.decode_event(
+                b'{"type":"end","stopReason":"cancelled","sessionId":"dddddddd-dddd-dddd-dddd-dddddddddddd"}'
+            ),
+            title="grok",
+            state=state,
+        )
+    )
+    completed = [e for e in events if isinstance(e, CompletedEvent)][0]
+    # Salvage: ok=True, plan text delivered, note appended to answer.
+    assert completed.ok is True
+    assert "## Plan" in (completed.answer or "")
+    assert _PLAN_CANCEL_NOTE in (completed.answer or "")
+    assert completed.error is None
+
+
+def test_plan_mode_cancelled_with_empty_answer_keeps_task12_error() -> None:
+    """Regression: plan-mode cancel with EMPTY answer -> Task-12 honest error."""
+    state = GrokStreamState(
+        resume=ResumeToken(engine=ENGINE, value="dddddddd-dddd-dddd-dddd-dddddddddddd"),
+        started=False,
+        plan_mode=True,
+    )
+    events = translate_grok_event(
+        grok_schema.decode_event(
+            b'{"type":"end","stopReason":"cancelled","sessionId":"dddddddd-dddd-dddd-dddd-dddddddddddd"}'
+        ),
+        title="grok",
+        state=state,
+    )
+    completed = [e for e in events if isinstance(e, CompletedEvent)][0]
+    # Empty answer -> no salvage; keep the Task-12 error.
+    assert completed.ok is False
+    assert _PLAN_CANCEL_NOTE not in (completed.answer or "")
+    assert "read-only" in (completed.error or "").lower()
+    assert "forbidden" in (completed.error or "").lower()
+
+
+def test_non_plan_cancelled_unchanged_by_salvage() -> None:
+    """Non-plan cancellation is NOT salvaged even with text (acceptance criterion 4)."""
+    state = GrokStreamState(
+        resume=ResumeToken(engine=ENGINE, value="dddddddd-dddd-dddd-dddd-dddddddddddd"),
+        started=False,
+        plan_mode=False,
+    )
+    events: list[TakopiEvent] = []
+    events.extend(
+        translate_grok_event(
+            grok_schema.decode_event(b'{"type":"text","data":"partial answer"}'),
+            title="grok",
+            state=state,
+        )
+    )
+    events.extend(
+        translate_grok_event(
+            grok_schema.decode_event(
+                b'{"type":"end","stopReason":"cancelled","sessionId":"dddddddd-dddd-dddd-dddd-dddddddddddd"}'
+            ),
+            title="grok",
+            state=state,
+        )
+    )
+    completed = [e for e in events if isinstance(e, CompletedEvent)][0]
+    # Non-plan cancel: old message, ok=False, no salvage note.
+    assert completed.ok is False
+    assert _PLAN_CANCEL_NOTE not in (completed.answer or "")
+    assert completed.error == "grok run stopped (cancelled)"
+
+
+def test_plan_mode_build_args_uses_soft_plan_not_permission_mode() -> None:
+    """Path B: plan-mode build_args uses soft-plan prefix, NOT --permission-mode plan.
+
+    Grok switches from native read-only enforcement to the shared soft-plan
+    prompt prefix (like codex/omp/opencode). No --permission-mode flag.
+    """
+    runner = GrokRunner(grok_cmd="grok", yolo=True)
+    session_id = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+    state = GrokStreamState(
+        resume=ResumeToken(engine=ENGINE, value=session_id),
+        started=False,
+    )
+    with apply_run_options(EngineRunOptions(plan=True)):
+        args = runner.build_args("do a thing", None, state=state)
+
+    # plan_mode flag is set for salvage purposes.
+    assert state.plan_mode is True
+    # No native permission-mode flag.
+    assert "--permission-mode" not in args
+    # The prompt is the soft-plan prefix variant (contains read-only instruction).
+    prompt_val = args[args.index("-p") + 1]
+    assert "plan mode" in prompt_val.lower()
+    assert "read-only" in prompt_val.lower()
+
+
+def test_plan_cancel_replay_from_capture_fixture_salvages() -> None:
+    """Replay the A0 capture fixture through translate_grok_event on plan_mode=True.
+
+    The fixture (stream-sample-plan-cancel.jsonl) ends with a cancelled end
+    after a write tool_call attempt and has trailing plan text. The salvage
+    net must fire: ok=True, plan text delivered, note present.
+    """
+    fixture = (
+        Path(__file__)
+        .parent.parent.joinpath(
+            "docs", "reference", "runners", "grok", "stream-sample-plan-cancel.jsonl"
+        )
+        .read_bytes()
+        .splitlines()
+    )
+    payloads = [line for line in fixture if line.strip()]
+    state = GrokStreamState(
+        resume=ResumeToken(engine=ENGINE, value="c0ffee00-plan-cancel-sample"),
+        started=False,
+        plan_mode=True,
+    )
+    events: list[TakopiEvent] = []
+    for payload in payloads:
+        events.extend(
+            translate_grok_event(
+                grok_schema.decode_event(payload),
+                title="grok",
+                state=state,
+            )
+        )
+    completed = [e for e in events if isinstance(e, CompletedEvent)][0]
+    # Salvage fired: plan text is in the answer, note appended, no error.
+    assert completed.ok is True
+    assert "Implementation Plan" in (completed.answer or "")
+    assert _PLAN_CANCEL_NOTE in (completed.answer or "")
+    assert completed.error is None

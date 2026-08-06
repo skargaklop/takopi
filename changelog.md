@@ -32,10 +32,13 @@
 - grok usage telemetry: mid-stream `usage` events are buffered and merged into the terminal `CompletedEvent.usage` (end-event usage takes precedence on conflicts).
 - grok forward compatibility: unknown event types (e.g. future CLI additions) now decode to a `StreamUnknownEvent` catch-all (DEBUG log, no events) instead of raising `msgspec.ValidationError` and spamming the log at WARNING level. Only genuinely malformed JSON triggers a warning.
 - subagent and skill selection: `/codex --subagent <name> <prompt>` (or `/subagent <name>`) selects a named subagent for a one-shot run; `--skill <name>` (or `/skill <name>`) selects a skill. Both forms parse in the leading command area alongside the engine selector and are name-passthrough (no validation — the harness resolves the name). Sticky `/subagent set <name>` / `/subagent off` / `/subagent clear` (chat-scoped) mirrors `/plan`. Wired for grok, claude, and opencode (`--agent`); codex maps to `--profile`. See [capability matrix](reference/runners/capability-matrix.md).
+- grok plan-mode cancel prevention: grok plan mode now uses the shared soft-plan prompt prefix (Path B) instead of native `--permission-mode plan`, eliminating the spurious turn cancellations that occurred when the agent attempted a write/execute in headless read-only mode. The soft-plan approach matches codex, omp, opencode, and pi (fallback). Trade-off: the hard read-only guarantee is dropped (documented in [plan-mode-cancel.md](reference/runners/grok/plan-mode-cancel.md)).
+- grok plan-mode salvage safety net: when a plan-mode run still ends with `stopReason=cancelled` (e.g. upstream abort) and plan text was produced, the plan is now delivered as a soft success with the note "turn ended by plan-mode enforcement; nothing was executed" instead of an opaque error. An empty-answer plan-mode cancel keeps the honest read-only error. Non-plan and user-initiated cancels are unaffected.
 
 ### changes
 
 - pi plan mode now detects the `@narumitw/pi-plan-mode` extension at runner startup. When detected, `--plan` is appended (delegating to the extension). When absent, Takopi falls back to the shared soft-plan prompt prefix and logs a one-time `pi.plan_mode_extension_missing` warning instead of blindly passing `--plan`. Removed the `pi.plan_flag` config flag — it is no longer needed.
+- grok `plan_enforcement` changed from `"native_readonly"` to `"soft"`, reflecting the switch from native `--permission-mode plan` to the soft-plan prompt prefix. This changes the file-delivery instruction injected for plan-mode grok runs (soft wording: "produce a plan as a .md file" instead of native-readonly "present the plan as your final TEXT answer").
 
 ### fixes
 
