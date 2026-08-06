@@ -704,6 +704,48 @@ undetected.
 
 ---
 
+## Task 20: Per-Harness Tool-Action Detail Parity (codex, opencode, pi, omp, agy)
+
+### Problem
+
+Recent tasks (Task 13 in particular) extended the detail shown in each Telegram progress step and in the grok message body for **grok** only: tool actions now render real command/path/pattern titles (`command: uv run pytest ...`, `read: 'file'`, `ls: '.'`) via a grok-local adapter (`_grok_tool_kind_and_title`) that normalizes grok tool names/inputs and delegates to the shared `tool_kind_and_title` helper. **Claude** already gets these titles natively (the shared helper was built around claude tool names). Every OTHER harness still falls through to the generic `("tool", <raw name>)` title in `tool_kind_and_title` (`src/takopi/tool_actions.py`), so progress steps for codex, opencode, pi, omp, and agy show opaque tool names with no real command/path/input — inconsistent with the grok/claude experience.
+
+Task 13 was the proof-of-concept for ONE harness. This task brings the remaining harnesses to parity: every supported engine must show the same level of tool-action detail (real command/path/pattern) in Telegram progress messages and final agent messages.
+
+### Requirements
+
+1. Per-harness local adapter, mirroring the Task 13 grok pattern: each runner that emits tool-call events (codex, opencode, pi, omp, agy, and any future runner from Task 4) supplies a `<engine>_tool_kind_and_title(tool_name, raw_input)` adapter that normalizes its native tool names and extracts a real command/path/pattern from `raw_input`, then delegates to the shared `tool_kind_and_title`. No engine-specific tool names leak into the shared helper — the helper stays generic (claude-native names only, as today).
+2. Field-name evidence for every tool's `rawInput` recorded from REAL captures per engine (no guessing) under `docs/reference/runners/<engine>/tool-fields.md`. Where a harness tool-name set or input schema is unknown, A0-capture a real run first (Task 13 / Task 11 capture pattern) before implementing.
+3. Consistent titles across engines for equivalent actions: a shell tool renders `command: <cmd>`, a read renders `read: '<file>'`, a list renders `ls: '<path>'`, etc. — the same title conventions Task 13 established for grok, applied uniformly.
+4. `tool_call`/`tool_call_update` close the current text segment on EVERY harness that accumulates narration between tool calls (the Task 13 segment-closing behavior): inter-tool narration becomes progress notes, the trailing text run is the answer, and final messages drop the concatenated-narration format. Skip this requirement for harnesses that do not emit inter-tool narration text (document the finding either way per engine).
+5. `tool_call_update` completion reuses the SAME kind/title as the start (existing meta cache untouched) on every harness — no divergence between start and update.
+6. No regressions: Task 9 (coalescing), Task 10 (thought-delimited split), Task 11 (tool actions/usage/unknown types), Task 13 (grok tool titles + delimiters), and the codex/claude/opencode subagent injection from Task 3 must all stay green.
+7. Cross-platform parity: the adapters must not assume a shell or OS-specific path shape; normalize via `pathlib`/`shlex` where a command/path is parsed from `raw_input` (see Cross-Platform Support section).
+
+### Investigation Steps
+
+1. **A0 capture per harness:** For each of codex, opencode, pi, omp, agy, capture a real JSONL stream sample (same args as each runner's `build_args()`) showing the tool-call events and their `rawInput` field shapes. Save under `docs/reference/runners/<engine>/stream-sample-tools.jsonl`. Read-only investigation subagents, scoped per engine, "Do NOT modify any files".
+2. **Document field shapes:** Record the native tool-name set and `rawInput` field names per tool per engine in `docs/reference/runners/<engine>/tool-fields.md` — no guessing (mirrors Task 13's `docs/reference/runners/grok/tool-fields.md`).
+3. **Study shared helper:** Review `src/takopi/tool_actions.py` (`tool_kind_and_title`) and the grok adapter (`_grok_tool_kind_and_title` in `grok.py`) to confirm the delegation contract every new adapter must satisfy.
+4. **Audit narration behavior:** Per engine, confirm whether the runner emits inter-tool narration text that glues to the trailing answer (Task 13 requirement 4 applies) or not (documented skip).
+5. **Write implementation plan:** One `.md` plan document in `docs/plans/` covering all five engines (or split per engine if scope warrants), with per-engine adapter signatures, title conventions, and test fixtures.
+6. **Execute via subagent (TDD):** Implement per-engine adapters + segment closing; tests built from the REAL captures.
+
+### Plan
+
+- TBD: requires A0 capture of real `rawInput` field shapes per engine before a spec can be approved.
+
+### Scope
+
+- `src/takopi/runners/codex.py`, `opencode.py`, `pi.py`, `omp.py`, `agy.py` — per-engine `_<engine>_tool_kind_and_title` adapter + segment closing on tool events (where applicable)
+- `src/takopi/tool_actions.py` — shared helper stays generic; no engine-specific names added (contract documentation only, if needed)
+- `tests/test_codex_runner.py`, `test_opencode_runner.py`, `test_pi_runner.py`, `test_omp_runner.py`, `test_agy_runner.py` — tool-title + delimiter tests from real captures
+- `docs/reference/runners/codex/tool-fields.md`, `opencode/tool-fields.md`, `pi/tool-fields.md`, `omp/tool-fields.md`, `agy/tool-fields.md` — field-name evidence
+- `docs/reference/runners/<engine>/stream-sample-tools.jsonl` — captured samples
+- `changelog.md`
+
+---
+
 ## Workflow Convention
 
 All non-trivial tasks in this roadmap follow this sequence:
