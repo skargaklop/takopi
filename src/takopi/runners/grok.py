@@ -14,7 +14,7 @@ from ..backends import EngineBackend, EngineConfig
 from ..config import ConfigError
 from ..events import EventFactory
 from ..logging import get_logger
-from ..model import EngineId, ResumeToken, TakopiEvent
+from ..model import ActionKind, EngineId, ResumeToken, TakopiEvent
 from ..runner import JsonlSubprocessRunner, ResumeTokenMixin, Runner
 from ._compact_mixin import HandoffCompactMixin
 from ..schemas import grok as grok_schema
@@ -73,7 +73,7 @@ class GrokStreamState:
     seen_tool_calls: set[str] = field(default_factory=set)
     # Maps toolCallId -> (kind, title) from the original tool_call event,
     # so tool_call_update can emit a completed event with the same kind/title.
-    tool_call_meta: dict[str, tuple[str, str]] = field(default_factory=dict)
+    tool_call_meta: dict[str, tuple[ActionKind, str]] = field(default_factory=dict)
     # Mid-stream usage events (merged into terminal CompletedEvent; end wins).
     mid_stream_usage: dict[str, Any] | None = None
     # True when the run was launched in plan mode (native read-only).
@@ -230,7 +230,7 @@ _GROK_INPUT_FIELD_MAP: dict[str, str] = {
 def _grok_tool_kind_and_title(
     tool_name: str,
     raw_input: Any,
-) -> tuple[str, str]:
+) -> tuple[ActionKind, str]:
     """Map grok tool names/fields to the shared helper's canonical contract.
 
     Translates the grok tool name (e.g. ``run_terminal_command``) to the
