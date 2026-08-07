@@ -2,6 +2,15 @@
 
 ## unreleased
 
+### omp/pi stream compatibility
+
+- forward-compatible Pi/OMP stream decoding: unknown-but-valid `type` tags (e.g. `notice`, `auto_retry_start`) now decode to `PiUnknownEvent` and produce one DEBUG diagnostic per line instead of raising `jsonl.msgspec.invalid`. Known event structs remain strict. Malformed lines stay line-local — the decoder skips the bad line and continues translating later events.
+- float `delayMs` tolerance: OMP 17.2.10 emits float `duration`/`ttft`/`delayMs` values; the schema now accepts `int | float | None` without rounding or normalizing producer precision.
+- full OMP session IDs: OMP opts out of Pi's abbreviated session-ID behavior via an explicit `shorten_session_id` policy on `PiStreamState`. OMP `StartedEvent`/resume footers now surface the complete UUID (e.g. `019fde20-f307-7000-a94b-3b2d53fee35d`), matching `omp --resume <full-uuid>`.
+- OmniRoute 503 capacity classification: the shared `transient_failures` classifier now recognizes OMP's bare `503 … retry-after-ms=…` prefix (no `http`/`status` keyword) and deduplicates the provider-suffixed reason. Capacity 503s are attributed to OmniRoute (surfaced through OMP), not OMP-owned capacity. Pre-start `rc=0` retries and `stopReason:"error"` completions both classify as transient.
+- file-backed task workflow: non-image document uploads with `auto_put_mode="prompt"` now instruct the agent to execute the task contained in the uploaded file (`Execute the task specified in this file: \`<path>\`.`) instead of annotating with a passive `[uploaded file: ...]` marker. Turns long structured prompts into first-class file-backed runs.
+- `live_omp` pytest marker and live OMP stream smoke (`tests/test_omp_stream_live.py`): spawns the real `omp` CLI, translates the JSONL stream through `OmpRunner`, and asserts a clean Started/Completed lifecycle plus full session-id preservation. Skipped when `omp` is absent.
+
 ### ci
 
 - cross-platform GitHub Actions CI matrix: `.github/workflows/ci.yml` now runs lint (`format`, `ruff`, `ty`) and `pytest` on `ubuntu-latest`, `macos-latest`, and `windows-latest`. `ty` is a hard gate (Task 18 reached zero diagnostics). Coverage gate (`--cov-fail-under=81`) runs on Linux only to avoid triple-counting. `PYTHONUTF8=1` is set on all jobs. `build` and `docs` stay Linux-only. The `notify-commit` Telegram job is removed.

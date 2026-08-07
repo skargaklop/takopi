@@ -63,3 +63,7 @@ Takopi uses these launch flags:
 
 The event translator currently reuses the Pi JSON event schema because the
 installed OMP package emits the same agent session event types.
+
+See [stream compatibility](./stream-compatibility.md) for evidence on how
+the Pi/OMP JSONL schema handles forward-compatible event types, float
+timing fields, and OmniRoute capacity failures.
