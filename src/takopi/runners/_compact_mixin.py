@@ -8,9 +8,21 @@ optionally passing instructions as part of the prompt.
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from typing import Protocol, runtime_checkable
 
 from ..compact import CompactSupport, compact_prompt
 from ..model import ResumeToken, TakopiEvent
+
+
+@runtime_checkable
+class _CompactRunner(Protocol):
+    """Structural contract for runners using the compact mixins."""
+
+    compact_accepts_instructions: bool
+
+    def run(
+        self, prompt: str, resume: ResumeToken | None
+    ) -> AsyncIterator[TakopiEvent]: ...
 
 
 class SlashCompactMixin:
@@ -27,7 +39,7 @@ class SlashCompactMixin:
         )
 
     async def compact(
-        self,
+        self: _CompactRunner,
         resume: ResumeToken,
         instructions: str | None = None,
     ) -> AsyncIterator[TakopiEvent]:
@@ -56,7 +68,7 @@ class HandoffCompactMixin:
         )
 
     async def compact(
-        self,
+        self: _CompactRunner,
         resume: ResumeToken,
         instructions: str | None = None,
     ) -> AsyncIterator[TakopiEvent]:

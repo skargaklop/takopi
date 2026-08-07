@@ -30,7 +30,7 @@ from .utils.transient_failures import (
     classify_transient_failure,
     format_transient_failure,
 )
-from .utils.subprocess import manage_subprocess
+from .utils.subprocess import DEFAULT_SHUTDOWN_TIMEOUT_S, manage_subprocess
 
 
 class ResumeTokenMixin:
@@ -196,6 +196,7 @@ class AttemptBatch(NamedTuple):
 class JsonlSubprocessRunner(BaseRunner):
     startup_timeout_s: float | None = None
     idle_timeout_s: float | None = None
+    shutdown_timeout_s: float = DEFAULT_SHUTDOWN_TIMEOUT_S
     retry_max_attempts: int = 3
     retry_base_delay_s: float = 5.0
 
@@ -742,6 +743,7 @@ class JsonlSubprocessRunner(BaseRunner):
             stderr=subprocess.PIPE,
             env=env,
             cwd=cwd,
+            close_timeout=self.shutdown_timeout_s,
         ) as proc:
             if proc.stdout is None or proc.stderr is None:
                 raise RuntimeError(self.pipes_error_message())

@@ -69,6 +69,18 @@ async def kill_process_tree(proc: Process) -> None:
     kill_process(proc)
 
 
+def _kill_process_group(pid: int, sig: signal.Signals) -> None:
+    """Send *sig* to the POSIX process group of *pid* via ``os.killpg``.
+
+    ``os.killpg`` is POSIX-only; resolving it dynamically keeps the module
+    importable (and type-checkable) on Windows, where callers never invoke it.
+    """
+    killpg = getattr(os, "killpg", None)
+    if killpg is None:  # pragma: no cover - non-POSIX platform
+        return
+    killpg(pid, sig)
+
+
 def _signal_process(
     proc: Process,
     sig: signal.Signals | None,
@@ -78,9 +90,9 @@ def _signal_process(
 ) -> None:
     if proc.returncode is not None:
         return
-    if os.name == "posix" and proc.pid is not None:
+    if os.name == "posix" and proc.pid is not None and sig is not None:
         try:
-            os.killpg(proc.pid, sig)
+            _kill_process_group(proc.pid, sig)
             return
         except ProcessLookupError:
             return

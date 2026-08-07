@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, Literal
 
 import anyio
 
@@ -269,7 +269,7 @@ def make_cfg(
     prompt_batch_debounce_s: float = 0.0,
     prompt_batch_max_messages: int = 8,
     prompt_batch_max_chars: int = 120_000,
-    prompt_batch_separator: str = "blank_line",
+    prompt_batch_separator: Literal["newline", "blank_line"] = "blank_line",
 ) -> TelegramBridgeConfig:
     if runner is None:
         runner = ScriptRunner([Return(answer="ok")], engine=engine_id)
@@ -309,7 +309,7 @@ def make_multi_runner_cfg(
     prompt_batch_debounce_s: float = 0.0,
     prompt_batch_max_messages: int = 8,
     prompt_batch_max_chars: int = 120_000,
-    prompt_batch_separator: str = "blank_line",
+    prompt_batch_separator: Literal["newline", "blank_line"] = "blank_line",
 ) -> TelegramBridgeConfig:
     if not runners:
         raise ValueError("make_multi_runner_cfg needs at least one runner")

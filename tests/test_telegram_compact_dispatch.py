@@ -74,13 +74,28 @@ class FakeTransport:
     async def close(self) -> None:
         pass
 
+    async def delete(self, *, ref: MessageRef) -> bool:
+        return True
+
 
 class FakeBot(BotClient):
     def __init__(self) -> None:
         self.callback_calls: list[dict] = []
 
-    async def answer_callback_query(self, callback_query_id: str, **kwargs) -> None:
-        self.callback_calls.append({"callback_query_id": callback_query_id, **kwargs})
+    async def answer_callback_query(
+        self,
+        callback_query_id: str,
+        text: str | None = None,
+        show_alert: bool | None = None,
+    ) -> bool:
+        self.callback_calls.append(
+            {
+                "callback_query_id": callback_query_id,
+                "text": text,
+                "show_alert": show_alert,
+            }
+        )
+        return True
 
     async def get_me(self):  # type: ignore[override]
         class _Me:
@@ -125,8 +140,7 @@ class CompactableScriptRunner(ScriptRunner):
                 engine=self.engine, ok=True, answer=self._compact_answer, resume=resume
             )
         else:
-            yield TakopiEvent()  # minimal event
-        del resume, instructions
+            yield CompletedEvent(engine=self.engine, ok=True, answer="", resume=resume)
 
 
 class HandoffScriptRunner(ScriptRunner):

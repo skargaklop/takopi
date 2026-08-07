@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 from pathlib import Path
 
 from takopi.outbound_files import (
@@ -14,7 +15,13 @@ from takopi.outbound_files import (
 from takopi.settings import TelegramFilesSettings
 
 
-def _settings(**kwargs) -> OutboundSettings:
+def _settings(
+    *,
+    enabled: bool | None = None,
+    send_extensions: tuple[str, ...] | None = None,
+    max_files: int | None = None,
+    plan_auto_file: bool | None = None,
+) -> OutboundSettings:
     base = OutboundSettings(
         enabled=True,
         send_enabled=True,
@@ -37,21 +44,20 @@ def _settings(**kwargs) -> OutboundSettings:
         plan_auto_file=True,
         outgoing_dir="outgoing",
     )
-    if not kwargs:
+    if (
+        enabled is None
+        and send_extensions is None
+        and max_files is None
+        and plan_auto_file is None
+    ):
         return base
-    data = {
-        "enabled": base.enabled,
-        "send_enabled": base.send_enabled,
-        "send_extensions": base.send_extensions,
-        "deny_globs": base.deny_globs,
-        "max_bytes": base.max_bytes,
-        "max_files": base.max_files,
-        "plan_require_send": base.plan_require_send,
-        "plan_auto_file": base.plan_auto_file,
-        "outgoing_dir": base.outgoing_dir,
-    }
-    data.update(kwargs)
-    return OutboundSettings(**data)
+    return dataclasses.replace(
+        base,
+        **({"enabled": enabled} if enabled is not None else {}),
+        **({"send_extensions": send_extensions} if send_extensions is not None else {}),
+        **({"max_files": max_files} if max_files is not None else {}),
+        **({"plan_auto_file": plan_auto_file} if plan_auto_file is not None else {}),
+    )
 
 
 def test_default_whitelist_from_settings() -> None:

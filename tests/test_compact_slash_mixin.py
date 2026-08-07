@@ -33,8 +33,9 @@ async def test_slash_compact_delegates_to_run_with_instructions() -> None:
 
     assert runner.calls[-1] == ("/compact keep tests", resume)
     assert isinstance(events[0], StartedEvent)
-    assert isinstance(events[-1], CompletedEvent)
-    assert events[-1].resume == events[0].resume
+    final = events[-1]
+    assert isinstance(final, CompletedEvent)
+    assert final.resume == events[0].resume
 
 
 @pytest.mark.anyio

@@ -294,8 +294,8 @@ Compaction modes:
 |------|-------------|----------|
 | `slash_prompt` | Delegates to `run("/compact [instructions]", resume)` | claude, pi, codex |
 | `native_api` | Calls the engine's HTTP API directly | opencode |
-| `acp` | Uses ACP `session/prompt` after capability-gating | grok, omp |
-| `handoff_only` | Generates a handoff summary (not real compaction) | agy |
+| `acp` | Uses ACP `session/prompt` over a production stdio JSON-RPC transport after capability-gating | _(not yet enabled — grok and omp remain `handoff_only` pending live ACP evidence)_ |
+| `handoff_only` | Generates a handoff summary (not real compaction) | agy, grok, omp |
 | `none` | Compaction not supported | mock, third-party without impl |
 
 Requirements:

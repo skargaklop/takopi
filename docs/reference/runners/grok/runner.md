@@ -12,7 +12,7 @@ grok -p <prompt> --output-format streaming-json [--yolo] [-m <model>] [--session
 
 ### Non-goals (v1)
 
-- ACP / `grok agent stdio` long-lived JSON-RPC
+- ACP / `grok agent stdio` long-lived JSON-RPC for `/compact` — production transport shipped (`SubprocessAcpTransport`), but Grok remains `handoff_only` until live evidence. See [acp-compact.md](acp-compact.md).
 
 ## Resume UX
 

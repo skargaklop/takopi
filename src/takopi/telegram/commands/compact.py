@@ -19,8 +19,8 @@ if TYPE_CHECKING:
     from ...context import RunContext
     from ..bridge import TelegramBridgeConfig
     from ..types import TelegramIncomingMessage
-    from collections.abc import Callable, Mapping
-    from collections.abc import Awaitable
+    from collections.abc import Mapping
+    from .reply import ReplyCallable
 
 
 @dataclass(frozen=True, slots=True)
@@ -41,7 +41,7 @@ async def handle_compact_command(
     *,
     cfg: TelegramBridgeConfig,
     msg: TelegramIncomingMessage,
-    reply: Callable[..., Awaitable[None]],
+    reply: ReplyCallable,
     scheduler: ThreadScheduler,
     resume_resolver: ResumeResolver,
     topic_store: object | None,
@@ -205,6 +205,10 @@ async def handle_compact_command(
             reply_markup=COMPACT_CONFIRM_MARKUP,
         )
         if ref is not None:
+            if isinstance(ref.message_id, str):
+                raise RuntimeError(
+                    "telegram compact confirmation returned a non-integer message id"
+                )
             confirm_key = (chat_id, ref.message_id)
             _supersede_pending(state, chat_id, msg.thread_id)
             state.pending_compact_confirms[confirm_key] = PendingCompactConfirm(

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
@@ -11,7 +11,7 @@ from ..engine_defaults import resolve_engine_for_message
 from ..engine_overrides import EngineOverrides
 from ..topic_state import TopicStateStore
 from ..types import TelegramIncomingMessage
-from .reply import make_reply
+from .reply import ReplyCallable, make_reply
 
 if TYPE_CHECKING:
     from ..bridge import TelegramBridgeConfig
@@ -132,7 +132,7 @@ def parse_set_args(
 
 async def apply_engine_override(
     *,
-    reply: Callable[..., Awaitable[None]],
+    reply: ReplyCallable,
     tkey: tuple[int, int] | None,
     topic_store: TopicStateStore | None,
     chat_prefs: ChatPrefsStore | None,

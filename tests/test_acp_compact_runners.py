@@ -55,7 +55,9 @@ async def test_grok_compact_uses_handoff_prompt(
     events = [evt async for evt in runner.compact(resume, "preserve decisions")]
 
     assert len(events) == 1
-    assert events[0].ok is True
+    event = events[0]
+    assert isinstance(event, CompletedEvent)
+    assert event.ok is True
     assert captured[0] == handoff_prompt("preserve decisions")
 
 
@@ -79,5 +81,7 @@ async def test_omp_compact_uses_handoff_prompt(monkeypatch: pytest.MonkeyPatch) 
     events = [evt async for evt in runner.compact(resume, "preserve decisions")]
 
     assert len(events) == 1
-    assert events[0].ok is True
+    event = events[0]
+    assert isinstance(event, CompletedEvent)
+    assert event.ok is True
     assert captured[0] == handoff_prompt("preserve decisions")

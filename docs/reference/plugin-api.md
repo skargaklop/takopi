@@ -152,7 +152,7 @@ class MyRunner(SlashCompactMixin, ResumeTokenMixin, JsonlSubprocessRunner):
 
 - `compact_support()` returns a `CompactSupport` describing the mode.
 - `compact(resume, instructions)` yields `TakopiEvent` following the same started→completed invariant as `run()`.
-- Use `AcpCompactMixin` for runners that compact via ACP `session/prompt`. **Test-only** — no subprocess transport is implemented; omp and grok currently use `HandoffCompactMixin`. When a transport is available, override `create_acp_client()`.
+- Use `AcpCompactMixin` for runners that compact via ACP `session/prompt` over a production stdio JSON-RPC transport (`SubprocessAcpTransport`). OMP and Grok remain `HandoffCompactMixin` (handoff-only) until each harness's own live ACP smoke probe passes; see [grok/acp-compact.md](runners/grok/acp-compact.md) and [omp/acp-compact.md](runners/omp/acp-compact.md). Override `create_acp_client()` to construct the harness-specific `AcpClient`.
 - Use `HandoffCompactMixin` for handoff-only runners (agy, omp, grok). It delegates compact to `run(handoff_prompt(instructions))`.
 - `get_compact_support(runner)` safely returns `COMPACT_NONE` for runners without compaction.
 

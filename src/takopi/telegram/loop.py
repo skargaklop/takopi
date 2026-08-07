@@ -81,7 +81,7 @@ from .commands.parse import (
     parse_compact_invocation,
     parse_handoff_invocation,
 )
-from .commands.reply import make_reply
+from .commands.reply import ReplyCallable, make_reply
 from .context import _merge_topic_context, _usage_ctx_set, _usage_topic
 from .topics import (
     _maybe_rename_topic,
@@ -589,7 +589,7 @@ class TelegramCommandContext:
     chat_prefs: ChatPrefsStore | None
     resolved_scope: str | None
     scope_chat_ids: frozenset[int]
-    reply: Callable[..., Awaitable[None]]
+    reply: ReplyCallable
     task_group: TaskGroup
     scheduler: ThreadScheduler | None = None
     running_tasks: Mapping[MessageRef, object] | None = None
@@ -1576,7 +1576,8 @@ async def run_main_loop(
                 refresh_topics_scope()
                 await set_command_menu(cfg)
                 if state.transport_snapshot is not None:
-                    new_snapshot = reload.settings.transports.telegram.model_dump()
+                    telegram = reload.settings.transports.telegram
+                    new_snapshot = telegram.model_dump() if telegram is not None else {}
                     changed = _diff_keys(state.transport_snapshot, new_snapshot)
                     if changed:
                         logger.warning(
@@ -2007,7 +2008,7 @@ async def run_main_loop(
                 ambient_context: RunContext | None,
                 topic_key: tuple[int, int] | None,
                 chat_project: str | None,
-                reply: Callable[..., Awaitable[None]],
+                reply: ReplyCallable,
             ) -> tuple[RunContext | None, bool]:
                 effective_context = ambient_context
                 if (

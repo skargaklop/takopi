@@ -47,11 +47,12 @@ async def test_opencode_compact_posts_to_session_endpoint() -> None:
         ("POST", "/api/session/ses_abc/compact"),
         ("POST", "/api/session/ses_abc/wait"),
     ]
-    assert len(events) >= 2
-    assert isinstance(events[0], StartedEvent)
-    assert isinstance(events[-1], CompletedEvent)
-    assert events[-1].resume == events[0].resume
-    assert events[-1].ok is True
+    first = events[0]
+    assert isinstance(first, StartedEvent)
+    final = events[-1]
+    assert isinstance(final, CompletedEvent)
+    assert final.resume == first.resume
+    assert final.ok is True
 
 
 @pytest.mark.anyio
@@ -81,7 +82,9 @@ async def test_opencode_compact_without_wait() -> None:
     events = [evt async for evt in runner.compact(resume, None)]
 
     assert requests == [("POST", "/api/session/ses_xyz/compact")]
-    assert events[-1].ok is True
+    final = events[-1]
+    assert isinstance(final, CompletedEvent)
+    assert final.ok is True
 
 
 @pytest.mark.anyio
@@ -102,7 +105,7 @@ async def test_opencode_compact_error_emits_failed_completed() -> None:
 
     events = [evt async for evt in runner.compact(resume, None)]
 
-    assert isinstance(events[0], StartedEvent)
-    assert isinstance(events[-1], CompletedEvent)
-    assert events[-1].ok is False
-    assert events[-1].resume == resume
+    final = events[-1]
+    assert isinstance(final, CompletedEvent)
+    assert final.ok is False
+    assert final.resume == resume

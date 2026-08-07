@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import io
-from collections.abc import Awaitable, Callable
 from typing import Protocol
 
 from ..logging import get_logger
 from openai import AsyncOpenAI, OpenAIError
 
 from .client import BotClient
+from .commands.reply import ReplyCallable
 from .types import TelegramIncomingMessage
 
 logger = get_logger(__name__)
@@ -59,7 +59,7 @@ async def transcribe_voice(
     enabled: bool,
     model: str,
     max_bytes: int | None = None,
-    reply: Callable[..., Awaitable[None]],
+    reply: ReplyCallable,
     transcriber: VoiceTranscriber | None = None,
     base_url: str | None = None,
     api_key: str | None = None,

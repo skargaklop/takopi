@@ -7,6 +7,7 @@ regimes and workflows) and Task 6 (queue safety audit).
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Literal
 
 import anyio
 import pytest
@@ -76,7 +77,7 @@ def _chat_cfg(
     transport: FakeTransport,
     config_path: Path,
     *,
-    session_mode: str = "stateless",
+    session_mode: Literal["stateless", "chat"] = "stateless",
     topics: TelegramTopicsSettings | None = None,
 ) -> TelegramBridgeConfig:
     runtime = TransportRuntime(

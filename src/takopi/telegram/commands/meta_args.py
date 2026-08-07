@@ -63,3 +63,4 @@ def should_handle_as_meta_command(
         return is_sticky_goal_args(args_text)
     if cmd == "subagent":
         return is_sticky_subagent_args(args_text)
+    return False

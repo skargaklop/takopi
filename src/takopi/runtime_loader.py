@@ -167,6 +167,8 @@ def build_router(
             runner.startup_timeout_s = runner_settings.startup_timeout_s  # type: ignore[attr-defined]
         if hasattr(runner, "idle_timeout_s"):
             runner.idle_timeout_s = runner_settings.idle_timeout_s  # type: ignore[attr-defined]
+        if hasattr(runner, "shutdown_timeout_s"):
+            runner.shutdown_timeout_s = runner_settings.shutdown_timeout_s  # type: ignore[attr-defined]
         if hasattr(runner, "retry_max_attempts"):
             runner.retry_max_attempts = runner_settings.retry_max_attempts  # type: ignore[attr-defined]
         if hasattr(runner, "retry_base_delay_s"):

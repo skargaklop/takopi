@@ -71,6 +71,7 @@ docs = [
 
 [tool.pytest.ini_options]
 addopts = ["--cov=takopi", "--cov-branch", "--cov-report=term-missing", "--cov-fail-under=81"]
+markers = ["live_acp: requires a live ACP-capable CLI and an existing session ID env var"]
 testpaths = ["tests"]
 
 [tool.mutmut]

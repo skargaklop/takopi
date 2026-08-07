@@ -2,6 +2,17 @@
 
 ## unreleased
 
+### typing
+
+- zero-diagnostic `ty check src tests` baseline: corrected all 41 diagnostics at the source (structural `self` protocols for compact mixins, `ReplyCallable` named protocol returning `MessageRef | None`, Telegram `message_id` narrowing, `meta_args` default return, `loop.py` optional narrowing, cross-platform `_kill_process_group` typing). No `# type: ignore`, `cast(Any, ...)`, or rule weakenings.
+
+### features
+
+- production ACP stdio transport: `SubprocessAcpTransport` implements newline-delimited JSON-RPC 2.0 over a managed subprocess with exact framing, ID correlation, queued `session/update` notifications, server-request `-32601` replies, and `AcpProtocolError` for malformed/EOF/timeout/mismatch responses. `AcpClient` is an async context manager with protocol-version-1 gating, capability-driven `session/load`/`session/resume` (never `session/new`), and `session/prompt` for compact. Reuses `manage_subprocess`, `drain_stderr`, and AnyIO streams — no JSON-RPC dependency added.
+- `shutdown_timeout_s` propagation: `JsonlSubprocessRunner.shutdown_timeout_s` now feeds `manage_subprocess(close_timeout=...)`, and `runtime_loader.build_router` propagates `RunnerSettings.shutdown_timeout_s` alongside startup/idle/retry settings. Closes the gap between documented config and runtime use.
+- `live_acp` pytest marker and per-engine ACP compact smoke probes (`tests/test_grok_compact_acp.py`, `tests/test_omp_compact_acp.py`): skip without `TAKOPI_GROK_ACP_SESSION_ID`/`TAKOPI_OMP_ACP_SESSION_ID`. Both Grok and OMP remain `HandoffCompactMixin` (`mode="handoff_only"`, `true_compaction=False`) until each harness's own probe passes. Evidence records at `docs/reference/runners/{grok,omp}/acp-compact.md`.
+
+
 ### features
 
 - runner compaction protocol: runners MAY implement `compact_support()` and `compact()` to participate in `/compact`. Five modes: `slash_prompt` (claude, pi, codex), `native_api` (opencode), `handoff_only` (agy, omp, grok), `none`. Compact jobs serialize on the same `ThreadScheduler` as prompt jobs. See [specification §5.7](reference/specification.md#57-runner-compaction-protocol-may).

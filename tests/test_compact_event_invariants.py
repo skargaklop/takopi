@@ -65,21 +65,47 @@ async def test_opencode_compact_event_invariants() -> None:
 async def test_acp_compact_event_invariants() -> None:
     """ACP compact (grok/omp) preserves event order when compact is advertised."""
     from takopi.model import ResumeToken
-    from takopi.runners._acp import FakeAcpTransport
-    from takopi.runners.grok import GrokRunner
+    from takopi.runners._acp import AcpClient, AcpCompactMixin, FakeAcpTransport
+    from takopi.runners.mock import ScriptRunner
 
     transport = FakeAcpTransport()
     transport.queue_response(
-        "initialize", {"protocolVersion": 1, "agentCapabilities": {"loadSession": True}}
+        "initialize",
+        {"protocolVersion": 1, "agentCapabilities": {"loadSession": True}},
     )
     transport.queue_response("session/load", {})
     transport.queue_response("session/prompt", {"stopReason": "stop"})
     transport.emit_notification(
-        "available_commands_update",
-        {"availableCommands": [{"name": "compact"}]},
+        "session/update",
+        {
+            "update": {
+                "sessionUpdate": "available_commands_update",
+                "availableCommands": [{"name": "compact"}],
+            }
+        },
     )
-    runner = GrokRunner()
-    runner._acp_transport = transport
+
+    class AcpRunner(AcpCompactMixin, ScriptRunner):
+        engine = "grok"
+        compact_accepts_instructions = True
+        close_timeout_s = 5.0
+        startup_timeout_s: float | None = 60.0
+
+        def __init__(self, transport: FakeAcpTransport) -> None:
+            super().__init__([], engine="grok")
+            self._acp_transport = transport
+
+        def command(self) -> str:
+            return "grok"
+
+        def create_acp_client(self) -> AcpClient:
+            return AcpClient(
+                command="grok",
+                args=["agent", "stdio"],
+                transport=self._acp_transport,
+            )
+
+    runner = AcpRunner(transport)
     resume = ResumeToken(engine="grok", value="sid")
     events = [evt async for evt in runner.compact(resume, "keep tests")]
     assert_compact_event_invariants(events)
@@ -89,24 +115,52 @@ async def test_acp_compact_event_invariants() -> None:
 async def test_acp_compact_not_advertised_emits_failed_event() -> None:
     """ACP compact emits a failed CompletedEvent when compact is not advertised."""
     from takopi.model import ResumeToken
-    from takopi.runners._acp import FakeAcpTransport
-    from takopi.runners.grok import GrokRunner
+    from takopi.runners._acp import AcpClient, AcpCompactMixin, FakeAcpTransport
+    from takopi.runners.mock import ScriptRunner
 
     transport = FakeAcpTransport()
     transport.queue_response(
-        "initialize", {"protocolVersion": 1, "agentCapabilities": {"loadSession": True}}
+        "initialize",
+        {"protocolVersion": 1, "agentCapabilities": {"loadSession": True}},
     )
     transport.queue_response("session/load", {})
     transport.emit_notification(
-        "available_commands_update",
-        {"availableCommands": [{"name": "edit"}]},
+        "session/update",
+        {
+            "update": {
+                "sessionUpdate": "available_commands_update",
+                "availableCommands": [{"name": "edit"}],
+            }
+        },
     )
-    runner = GrokRunner()
-    runner._acp_transport = transport
+
+    class AcpRunner(AcpCompactMixin, ScriptRunner):
+        engine = "grok"
+        compact_accepts_instructions = True
+        close_timeout_s = 5.0
+        startup_timeout_s: float | None = 60.0
+
+        def __init__(self, transport: FakeAcpTransport) -> None:
+            super().__init__([], engine="grok")
+            self._acp_transport = transport
+
+        def command(self) -> str:
+            return "grok"
+
+        def create_acp_client(self) -> AcpClient:
+            return AcpClient(
+                command="grok",
+                args=["agent", "stdio"],
+                transport=self._acp_transport,
+            )
+
+    runner = AcpRunner(transport)
     resume = ResumeToken(engine="grok", value="sid")
     events = [evt async for evt in runner.compact(resume, None)]
     assert_compact_event_invariants(events)
-    assert events[-1].ok is False
+    final = events[-1]
+    assert isinstance(final, CompletedEvent)
+    assert final.ok is False
 
 
 @pytest.mark.anyio

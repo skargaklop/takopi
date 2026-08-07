@@ -146,8 +146,10 @@ def test_doctor_runner_processes_none(monkeypatch) -> None:
     monkeypatch.setattr(doctor_mod, "_list_runner_processes", lambda: [])
     checks = doctor_mod._doctor_runner_processes()
     assert len(checks) == 1
-    assert checks[0].status == "ok"
-    assert "none found" in checks[0].detail
+    check = checks[0]
+    assert check.status == "ok"
+    assert check.detail is not None
+    assert "none found" in check.detail
 
 
 def test_doctor_runner_processes_found(monkeypatch) -> None:
@@ -169,7 +171,9 @@ def test_doctor_runner_processes_found(monkeypatch) -> None:
     )
     checks = doctor_mod._doctor_runner_processes()
     assert len(checks) == 1
-    assert checks[0].status == "warning"
-    assert "2 process(es)" in checks[0].detail
-    assert "1234" in checks[0].detail
-    assert "5678" in checks[0].detail
+    check = checks[0]
+    assert check.status == "warning"
+    assert check.detail is not None
+    assert "2 process(es)" in check.detail
+    assert "1234" in check.detail
+    assert "5678" in check.detail

@@ -1,19 +1,32 @@
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
 from functools import partial
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 from ..bridge import send_plain
+from ...transport import MessageRef
 from ..types import TelegramIncomingMessage
 
 if TYPE_CHECKING:
     from ..bridge import TelegramBridgeConfig
 
 
+class ReplyCallable(Protocol):
+    """Callable returned by :func:`make_reply` for sending Telegram replies."""
+
+    async def __call__(
+        self,
+        *,
+        text: str,
+        notify: bool = ...,
+        thread_id: int | None = ...,
+        reply_markup: dict | None = ...,
+    ) -> MessageRef | None: ...
+
+
 def make_reply(
     cfg: TelegramBridgeConfig, msg: TelegramIncomingMessage
-) -> Callable[..., Awaitable[None]]:
+) -> ReplyCallable:
     return partial(
         send_plain,
         cfg.exec_cfg.transport,
