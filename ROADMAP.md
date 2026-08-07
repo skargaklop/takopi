@@ -498,7 +498,7 @@ Live evidence 2026-08-05 (pi implementation run):
 
 ---
 
-## Task 14: Transient Upstream Failure Handling (Retry + Clean Errors)
+## Task 14: Transient Upstream Failure Handling (Retry + Clean Errors) — DONE
 
 ### Problem
 
@@ -524,11 +524,15 @@ Live evidence 2026-08-06: a grok run failed rc=1 with `action_count=0` and the u
 - `tests/test_transient_retry.py`, `tests/test_runner_utils.py`
 - `docs/reference/config.md`, `changelog.md`
 
----
+### Outcome
+
+Implemented in `93ba186` (`feat: Implement transient upstream failure retries`). Shared transient-failure classification and clean user-facing messages now cover HTTP 429/503, admission capacity, overloaded, rate-limit, and retry wording. JSONL runners retry only side-effect-free attempts with configurable `retry_max_attempts` and `retry_base_delay_s`; cancellation and non-transient failures preserve their existing behavior. Codex, agy, and grok coverage is included. The remaining cross-engine queue/schema follow-up is tracked separately in Tasks 21–22.
 
 ---
 
-## Task 15: Plan-Mode Cancel Prevention (Grok)
+---
+
+## Task 15: Plan-Mode Cancel Prevention (Grok) — DONE
 
 ### Problem
 
@@ -552,6 +556,10 @@ Live evidence 2026-08-06, AFTER the Task 12 rebuild: a `/plan` grok run still en
 - `tests/test_grok_runner.py`
 - `docs/reference/runners/grok/stream-sample-plan-cancel.jsonl`, `plan-mode-cancel.md`
 - `changelog.md`
+
+### Outcome
+
+Completed as the safe baseline before Task 16. The salvage path for cancelled plan turns with non-empty plan text was implemented and native/soft plan behavior was investigated. Task 16 subsequently established the hard-enforcement winner (`--permission-mode plan` plus the read-only tool allow-list), while retaining the Task 15 salvage net.
 
 ---
 
@@ -590,7 +598,7 @@ Implemented: grok `build_args` plan mode emits native `--permission-mode plan` +
 - `docs/reference/runners/grok/probes/*.jsonl`, `plan-mode-cancel.md`, `runner.md`
 - `changelog.md`
 
-## Task 17: Grok Internal Error Handling (503 / Capacity Unavailable)
+## Task 17: Grok Internal Error Handling (503 / Capacity Unavailable) — DONE
 
 ### Problem
 
@@ -629,6 +637,10 @@ backoff is feasible/worthwhile.
 
 - `src/takopi/runners/grok.py`
 - `tests/test_grok_runner.py`
+
+### Outcome
+
+Completed through the shared transient-failure implementation in `93ba186`. The real-shaped fixture `tests/fixtures/grok_stream_capacity_error.jsonl` is classified as HTTP 503 and converted to a clean capacity-unavailable message without raw JSON. The common retry/classification path is preferable to a grok-only retry implementation and is reused by other runners.
 
 ---
 
@@ -743,6 +755,136 @@ Task 13 was the proof-of-concept for ONE harness. This task brings the remaining
 - `docs/reference/runners/codex/tool-fields.md`, `opencode/tool-fields.md`, `pi/tool-fields.md`, `omp/tool-fields.md`, `agy/tool-fields.md` — field-name evidence
 - `docs/reference/runners/<engine>/stream-sample-tools.jsonl` — captured samples
 - `changelog.md`
+
+---
+
+## Task 21: Reliable Queued-Message Cancellation and Cross-Engine Queueing
+
+### Problem
+
+A live Telegram status showed `thread: omp:019fd7f2 busy: yes queued: 0`, but the queued message had no Cancel button. The user also attempted to queue a message for `omp` and it appeared not to be queued. The scheduler has queue cancellation primitives, but the end-to-end contract is not proven: the queued progress message may be rendered as non-queued, the progress reference may not be retained or mapped correctly, or the job may be consumed before the status is observed. This must be checked for every supported harness, not only `omp`.
+
+### Requirements
+
+1. Every message genuinely waiting behind an active run displays a Telegram **Cancel** button. If the active runner supports turn steering, preserve the existing steer/cancel controls; otherwise show cancel-only. The button remains attached until the queued job is claimed or cancelled.
+2. Pressing Cancel on a queued message removes exactly that queued job, edits the progress message to an honest cancelled terminal state, and never starts the agent subprocess. Repeated and stale callbacks are safe and idempotent.
+3. Queue status is accurate: `queued: N` reflects scheduler state for the resolved engine/session, and a message must not claim `queued` when enqueue failed or claim already happened. Any enqueue failure produces visible user feedback instead of silently losing the prompt.
+4. Verify queueing, cancellation, ordering, and resume/session routing across all configured engines: codex, claude, opencode, pi, omp, grok, agy, and plugin/new runners discovered at runtime. Do not hardcode engine names.
+5. Preserve active-run cancellation and Codex mid-turn steering semantics. Cancelling a queued message must not cancel the currently running job.
+6. Add regression tests for queue depth > 0, cancel callback routing by progress-message reference, cancel-before-worker-claim, cancel-after-claim race, stale/repeated callbacks, enqueue failure, and engine/session isolation.
+7. Verify end-to-end in Telegram, or with a faithful transport integration test, that the inline keyboard is present on the actual queued message and cancellation changes the visible state.
+
+### Investigation Steps
+
+1. Trace the full path from incoming message through `_send_queued_progress`, `scheduler.enqueue`, `_queued_by_progress`, Telegram callback dispatch, `cancel_queued`, and `_thread_worker`; identify why the observed `omp` message had `queued: 0` and no button.
+2. Reproduce with a deterministic blocking fake runner for every engine backend; capture the sent progress payload including `reply_markup`, scheduler state, and callback result.
+3. Confirm whether `running_task.done`, `is_busy()`, and scheduler queue depth are sampled before or after enqueue, and whether the progress reference is preserved across all enqueue call sites.
+4. Write an implementation plan in `docs/plans/` after the evidence is captured.
+5. Implement with TDD, then run unit, integration, and Telegram UI/transport verification.
+
+### Plan
+
+- TBD: reproduce the `omp` queue/cancel path first; the approved plan must include the all-engine matrix and identified root cause.
+
+### Scope
+
+- `src/takopi/scheduler.py` — queued-job lifecycle, cancellation races, depth/state reporting
+- `src/takopi/telegram/loop.py` — queued progress rendering and enqueue error handling
+- `src/takopi/telegram/bridge.py`, `src/takopi/telegram/commands/` — callback routing and terminal cancellation state
+- `src/takopi/presenter.py` / progress rendering — only if markup/state contract requires a narrow change
+- `tests/test_telegram_queue.py`, `tests/test_telegram_prompt_batch_integration.py`, scheduler/runner integration tests
+- `docs/plans/`, `changelog.md`
+
+---
+
+## Task 22: OMP/Pi Stream Schema Compatibility and Capacity-Failure Handling
+
+### Problem
+
+A live `omp` run emitted events that the pi-compatible JSONL decoder rejected:
+
+```text
+jsonl.msgspec.invalid: Expected `int | null`, got `float` - at `$.delayMs`
+jsonl.msgspec.invalid: Invalid value 'notice' - at `$.type`
+```
+
+The warnings occurred repeatedly during resume `019fd7f2`, so valid progress/event data may have been dropped. The run eventually exited with `rc=0` but completed as `ok=False` after 36 minutes with `503 Chat admission capacity is temporarily unavailable`. Tasks 14 and 17 now cleanly classify transient capacity errors, but they do not fix schema loss or establish that the OMP queue/run path survives new event variants.
+
+### Requirements
+
+0. Come up with an alternative system for long prompts—saving them to a file using takopi tools and sending a prompt to the agent in the form of “Execute the task specified in this file.”
+1. Capture real OMP JSONL containing `delayMs` as a float and `type: "notice"`; document the full fields under `docs/reference/runners/omp/`; identify which events are currently dropped.
+2. Make the Pi/OMP decoder forward-compatible for numeric fields whose producer may emit integer or float values (`delayMs` must preserve useful precision or normalize deliberately) and for non-critical event types such as `notice`; unknown future event types must not produce warning spam or abort the run.
+3. Preserve strict validation for genuinely malformed required fields. Malformed events may be skipped with a structured diagnostic, but must not hide a completed answer, usage, tool action, or terminal error.
+4. Ensure OMP terminal 503/capacity events reach the shared transient-failure classifier and produce one clean user-facing message; no raw JSON and no duplicate retry/error messages. Verify behavior when `rc=0` but the terminal event reports failure.
+5. Add fixture-based tests for float `delayMs`, `notice`, unknown event types, preserved tool/answer events, and the exact capacity-failure stream. Add a marked live OMP smoke test where credentials/CLI are available.
+6. Check all Pi-protocol consumers and engines using the decoder so the fix does not regress pi, and document the compatibility boundary for omp.
+
+### Investigation Steps
+
+1. Capture and archive the exact OMP stream from the reported scenario, including stdout/stderr and exit status.
+2. Trace schema dispatch in `src/takopi/runners/pi.py` and `src/takopi/schemas/pi.py`, then compare it with OMP's documented/native event protocol.
+3. Confirm whether dropped `notice` events affect progress, queue completion, answer delivery, or only optional telemetry.
+4. Write an implementation plan in `docs/plans/` and implement via TDD.
+5. Run pytest, ruff, type checks, and a live OMP smoke test when available.
+
+### Plan
+
+- TBD: exact OMP stream capture is required before selecting schema widening versus an OMP-local adapter.
+
+### Scope
+
+- `src/takopi/schemas/pi.py`, `src/takopi/runners/pi.py`, `src/takopi/runners/omp.py`
+- `tests/fixtures/omp_*.jsonl`, `tests/test_pi_schema.py`, `tests/test_pi_runner.py`, OMP runner tests
+- `docs/reference/runners/omp/`, `docs/reference/runners/pi/`
+- `changelog.md`
+
+---
+
+## Task 23: Model Override Propagation Across All Chat and Agent-Run Stages
+
+### Problem
+
+The `/model` command currently manages model overrides in chat/topic scopes and runner options support model overrides, but the end-to-end contract is not explicit or verified for every invocation path. A model selected by `/model` must be honored consistently in a common chat, a thematic Telegram topic, an arbitrary agent-engine call, and both new and existing sessions. The selected model must reach every applicable stage of the run rather than being lost during engine selection, session resolution, queueing, resume, batching, handoff, or runner construction.
+
+### Requirements
+
+1. `/model` must support and clearly define the effective model for all scopes:
+   - common chat scope;
+   - thematic chat/topic scope;
+   - an explicit engine call such as `/grok ...`, `/omp ...`, or `/agent <engine> ...`;
+   - a call that creates a new session;
+   - a call that resumes or continues an existing session.
+2. Model precedence must be deterministic and documented. At minimum, verify the intended order between an explicit per-run model, topic override, chat override, engine default, and runner default. A one-shot model selection must not unexpectedly mutate the persistent chat/topic override.
+3. The effective model must survive the complete dispatch pipeline: directive parsing, engine resolution, topic/chat override resolution, `EngineRunOptions`, prompt batching, scheduler `ThreadJob`, new-session creation, existing-session resume, and runner `build_args()`/ACP request construction.
+4. Every supported harness must receive the model in the correct native form when it supports model selection (CLI flag, profile/config field, or ACP/session parameter). If a harness cannot override its model for an existing session, detect and report that limitation honestly rather than silently ignoring `/model`.
+5. Existing-session behavior must be explicit: determine whether changing `/model` applies only to future turns, requires `/new`, or requires a harness-specific new session. `/model` status and confirmation replies must communicate the actual scope.
+6. Common-chat and thematic-chat overrides must remain isolated: setting a topic model must not alter the common chat model, and setting a common-chat model must not overwrite an explicit topic model. Engine-specific overrides must not bleed into another engine.
+7. Add a complete test matrix covering `/model show`, set, clear, shorthand, explicit engine selection, common chat, thematic topic, new session, existing session, queued/batched prompts, and all engines discovered at runtime. Verify the actual model argument/request emitted by each runner.
+8. Add an end-to-end Telegram verification path proving that a user can set a model and then invoke an engine in each scope/session mode, with the selected model visible in the runner invocation or captured request.
+
+### Investigation Steps
+
+1. Trace the current model flow from `src/takopi/telegram/commands/model.py` through `engine_overrides.py`, `loop.py`, `EngineRunOptions`, scheduler jobs, session resolution, and every runner's `build_args()`/ACP path.
+2. Build a matrix for common chat, thematic topic, explicit engine call, new session, existing session, queued prompt, and batched prompt; record where the model is selected, overridden, or dropped.
+3. Inspect each harness's model-selection semantics and existing-session limitations; save evidence under `docs/reference/runners/<engine>/` where documentation is missing.
+4. Define and document the precedence and persistence contract in `docs/reference/commands-and-directives.md` and the relevant session/config documentation.
+5. Write an implementation plan in `docs/plans/` before code changes.
+6. Implement with TDD, then verify unit, integration, and Telegram end-to-end behavior across all supported engines.
+
+### Plan
+
+- TBD: requires an end-to-end model-propagation audit and per-harness capability matrix before selecting the implementation plan.
+
+### Scope
+
+- `src/takopi/telegram/commands/model.py` — command contract, scope selection, status/clear behavior
+- `src/takopi/telegram/engine_overrides.py` — precedence and common/topic isolation
+- `src/takopi/telegram/loop.py`, `src/takopi/telegram/prompt_batch.py` — propagation through arbitrary calls and batches
+- `src/takopi/scheduler.py`, `src/takopi/runner_bridge.py`, session-resolution paths — preserve model on queued/new/resumed jobs
+- `src/takopi/runners/run_options.py`, `src/takopi/runners/*.py`, ACP clients — native model propagation
+- `tests/test_telegram_bridge.py`, `tests/test_telegram_engine_overrides.py`, `tests/test_runner_run_options.py`, per-runner tests, and new propagation matrix tests
+- `docs/reference/commands-and-directives.md`, `docs/reference/runners/<engine>/`, `docs/plans/`, `changelog.md`
 
 ---
 
