@@ -2,6 +2,10 @@
 
 ## unreleased
 
+### ci
+
+- cross-platform GitHub Actions CI matrix: `.github/workflows/ci.yml` now runs lint (`format`, `ruff`, `ty`) and `pytest` on `ubuntu-latest`, `macos-latest`, and `windows-latest`. `ty` is a hard gate (Task 18 reached zero diagnostics). Coverage gate (`--cov-fail-under=81`) runs on Linux only to avoid triple-counting. `PYTHONUTF8=1` is set on all jobs. `build` and `docs` stay Linux-only. The `notify-commit` Telegram job is removed.
+
 ### typing
 
 - zero-diagnostic `ty check src tests` baseline: corrected all 41 diagnostics at the source (structural `self` protocols for compact mixins, `ReplyCallable` named protocol returning `MessageRef | None`, Telegram `message_id` narrowing, `meta_args` default return, `loop.py` optional narrowing, cross-platform `_kill_process_group` typing). No `# type: ignore`, `cast(Any, ...)`, or rule weakenings.

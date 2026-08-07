@@ -739,7 +739,32 @@ undetected.
 
 ### Scope
 
-- `.github/workflows/ci.yml` (new)
+- `.github/workflows/ci.yml` (rewrite: single-OS → three-OS matrix)
+
+### Outcome
+
+Completed. `ci.yml` rewritten from a single `ubuntu-latest` `checks` job into a
+three-OS matrix (`ubuntu-latest`, `macos-latest`, `windows-latest`) split across
+four jobs:
+
+- **`lint`** (9 cells) — `format`, `ruff`, and `ty` on all three OSs.
+  `ty` is a hard gate (no `continue-on-error`) since Task 18 reached zero
+  diagnostics. Uses `uv sync --frozen --no-install-project` (no project install
+  needed for lint).
+- **`test`** (3 cells) — full `pytest tests/ -q --no-cov` on all three OSs.
+  A Linux-only `coverage gate` step re-runs pytest with `--cov=takopi
+  --cov-branch --cov-fail-under=81` so coverage is a single source of truth,
+  not triple-counted.
+- **`build`** (Linux only) — `uv build`.
+- **`docs`** (Linux only) — `scripts/docs_prebuild.py` + `zensical build`.
+
+`PYTHONUTF8=1` is set at the job `env:` level on `lint` and `test`, covering
+every step and OS. `fail-fast: false` preserves per-cell independence.
+`test_subprocess_close.py` is NOT ignored (it passes cross-platform; ROADMAP
+Task 6). `live_acp` tests auto-skip without session-ID env vars. The
+`notify-commit` Telegram job is removed entirely (per the user's decision).
+
+`release.yml` is untouched. Plan: `docs/plans/2026-08-07-task-19-cross-platform-ci.md`.
 
 ---
 
