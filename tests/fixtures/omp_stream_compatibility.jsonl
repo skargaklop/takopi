@@ -1,0 +1,13 @@
+{"type":"session","version":3,"id":"019fd7f2-d1dd-7000-97dd-dc3d5627ab43","timestamp":"2026-08-06T18:54:36.000Z","cwd":"D:\\Projects\\takopi"}
+{"type":"agent_start"}
+{"type":"turn_start"}
+{"type":"notice","level":"info","message":"Context window optimized","source":"compaction"}
+{"type":"future_event","payload":{"x":1}}
+{"type":"auto_retry_start","attempt":1,"maxAttempts":3,"delayMs":392.19364808040206,"errorMessage":"503 Chat admission capacity is temporarily unavailable. Retry shortly. retry-after-ms=2000","errorId":135168}
+{"type":"auto_retry_end","success":true,"attempt":1}
+{"type":"tool_execution_start","toolCallId":"call_5d18534f0cad","toolName":"read","args":{"path":"README.md"},"intent":"Read project readme"}
+{"type":"tool_execution_end","toolCallId":"call_5d18534f0cad","toolName":"read","result":{"content":[{"type":"text","text":"# takopi"}]}}
+{"type":"message_start","message":{"role":"assistant","content":[{"type":"text","text":"Done"}],"api":"openai-completions","provider":"omniroute","model":"glm-5.2-1m-combined","usage":{"input":27703,"output":3,"cacheRead":3264,"cacheWrite":0,"totalTokens":30970,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}},"stopReason":"stop","timestamp":1786041276361,"responseId":"omniroute-keepalive","duration":3425.7603,"ttft":3422.4582}}
+{"type":"message_end","message":{"role":"assistant","content":[{"type":"text","text":"Done"}],"api":"openai-completions","provider":"omniroute","model":"glm-5.2-1m-combined","usage":{"input":27703,"output":3,"cacheRead":3264,"cacheWrite":0,"totalTokens":30970,"cost":{"input":0,"output":0,"cacheRead":0,"cacheWrite":0,"total":0}},"stopReason":"stop","timestamp":1786041276361,"responseId":"omniroute-keepalive","duration":3425.7603,"ttft":3422.4582}}
+{"type":"turn_end","message":{"role":"assistant","content":[{"type":"text","text":"Done"}]},"toolResults":[]}
+{"type":"agent_end","messages":[],"isTerminal":true}
