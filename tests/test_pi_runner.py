@@ -173,7 +173,6 @@ def test_translate_error_fixture() -> None:
     assert completed.answer == "Request failed."
 
 
-
 def test_omp_compat_fixture_line_local_recovery() -> None:
     """OMP compatibility fixture: unknown/malformed lines are line-local.
 
@@ -192,7 +191,9 @@ def test_omp_compat_fixture_line_local_recovery() -> None:
             continue
         decoded = pi_schema.decode_event(line)
         events.extend(
-            runner.translate(decoded, state=state, resume=state.resume, found_session=None)
+            runner.translate(
+                decoded, state=state, resume=state.resume, found_session=None
+            )
         )
 
     # Unknown events produce no Takopi events
@@ -240,6 +241,7 @@ def test_unknown_event_produces_no_takopi_event(
     assert result == []
     assert calls.count("pi.stream.unknown_type") == 1
 
+
 def test_session_id_promotion_from_stdout() -> None:
     state = PiStreamState(
         resume=ResumeToken(engine=ENGINE, value="session.jsonl"),
@@ -258,6 +260,74 @@ def test_session_id_promotion_from_stdout() -> None:
     )
     started = next(evt for evt in events if isinstance(evt, StartedEvent))
     assert started.resume.value == "ccd569e0"
+
+
+def test_omp_session_id_promotion_keeps_full_uuid() -> None:
+    """OMP promotes the complete session ID, not the abbreviated prefix."""
+    full_id = "019fd7f2-d1dd-7000-97dd-dc3d5627ab43"
+    runner = OmpRunner(extra_args=[], model=None, provider=None)
+    state = runner.new_state("test", None)
+    assert state.shorten_session_id is False
+
+    events = runner.translate(
+        pi_schema.SessionHeader(
+            id=full_id,
+            version=3,
+            timestamp="2026-08-06T18:54:36.000Z",
+            cwd="D:/Projects/takopi",
+        ),
+        state=state,
+        resume=state.resume,
+        found_session=None,
+    )
+    started = next(evt for evt in events if isinstance(evt, StartedEvent))
+    assert started.resume.value == full_id
+    assert started.resume.engine == OMP_ENGINE
+
+
+def test_omp_resumed_state_keeps_full_uuid() -> None:
+    """A resumed OMP state already containing a full ID is unchanged."""
+    full_id = "019fd7f2-d1dd-7000-97dd-dc3d5627ab43"
+    runner = OmpRunner(extra_args=[], model=None, provider=None)
+    state = runner.new_state("test", ResumeToken(engine=OMP_ENGINE, value=full_id))
+    assert state.shorten_session_id is False
+    assert state.resume.value == full_id
+
+
+def test_pi_session_id_promotion_still_shortens() -> None:
+    """Pi retains its existing abbreviated session-ID behavior."""
+    full_id = "019fd7f2-d1dd-7000-97dd-dc3d5627ab43"
+    runner = PiRunner(extra_args=[], model=None, provider=None)
+    state = runner.new_state("test", None)
+    assert state.shorten_session_id is True
+
+    events = runner.translate(
+        pi_schema.SessionHeader(
+            id=full_id,
+            version=3,
+            timestamp="2026-08-06T18:54:36.000Z",
+            cwd="/tmp",
+        ),
+        state=state,
+        resume=state.resume,
+        found_session=None,
+    )
+    started = next(evt for evt in events if isinstance(evt, StartedEvent))
+    assert started.resume.value == "019fd7f2"
+
+
+def test_omp_format_resume_uses_full_uuid() -> None:
+    """OmpRunner.format_resume emits the complete UUID in the resume line."""
+    full_id = "019fd7f2-d1dd-7000-97dd-dc3d5627ab43"
+    runner = OmpRunner(extra_args=[], model=None, provider=None)
+    token = ResumeToken(engine=OMP_ENGINE, value=full_id)
+    formatted = runner.format_resume(token)
+    assert full_id in formatted
+    assert "019fd7f2-d1dd-7000-97dd-dc3d5627ab43" in formatted
+    # Round-trip
+    extracted = runner.extract_resume(formatted)
+    assert extracted is not None
+    assert extracted.value == full_id
 
 
 def test_extract_resume_keeps_session_path(tmp_path: Path) -> None:

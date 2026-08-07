@@ -59,6 +59,7 @@ class PiStreamState:
     last_usage: dict[str, Any] | None = None
     started: bool = False
     note_seq: int = 0
+    shorten_session_id: bool = True
 
 
 def _looks_like_session_path(token: str) -> bool:
@@ -90,7 +91,8 @@ def _maybe_promote_session_id(state: PiStreamState, session_id: str | None) -> N
         return
     if not _looks_like_session_path(state.resume.value):
         return
-    state.resume = ResumeToken(engine=ENGINE, value=_short_session_id(session_id))
+    value = _short_session_id(session_id) if state.shorten_session_id else session_id
+    state.resume = ResumeToken(engine=ENGINE, value=value)
     state.allow_id_promotion = False
 
 

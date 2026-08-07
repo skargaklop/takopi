@@ -24,17 +24,21 @@ Use `/omp` at the start of the first non-empty Telegram line:
 /omp inspect the failing tests
 ```
 
-Canonical resume line:
+Canonical resume line (Takopi preserves and round-trips the full OMP session ID):
 
 ```text
-`omp --resume ccd569e0`
+`omp --resume 019fd7f2-d1dd-7000-97dd-dc3d5627ab43`
 ```
 
 Takopi also accepts the Telegram-safe directive form:
 
 ```text
-/omp resume ccd569e0 continue
+/omp resume 019fd7f2-d1dd-7000-97dd-dc3d5627ab43 continue
 ```
+
+> **Note:** Unlike Pi (which abbreviates to an 8-character prefix for display),
+> OMP session IDs are shown and resumed in full. This ensures reliable
+> `--resume` matching even when short prefixes collide.
 
 ## Install
 

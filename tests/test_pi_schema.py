@@ -38,6 +38,7 @@ def test_pi_schema_parses_fixture(fixture: str) -> None:
     errors = _decode_fixture(fixture)
     assert not errors, f"{fixture} had {len(errors)} errors: " + "; ".join(errors[:5])
 
+
 @pytest.mark.parametrize(
     "fixture",
     [
@@ -102,7 +103,7 @@ def test_malformed_json_raises_decode_error() -> None:
     import msgspec
 
     with pytest.raises(msgspec.DecodeError):
-        pi_schema.decode_event('{not valid json')
+        pi_schema.decode_event("{not valid json")
 
 
 def test_missing_type_raises_validation_error() -> None:
