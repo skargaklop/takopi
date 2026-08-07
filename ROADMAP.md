@@ -124,13 +124,13 @@ Takopi cannot currently direct an agent to use a specific subagent or skill for 
 
 ---
 
-## Task 4: New Agent Support — Droid, Cline, Kilo, Warp, Open Interpreter
+## Task 4: New Agent Support — Droid, Cline, Kilo, Warp, Open Interpreter, Mimo Code, ZCode, Kimi Code
 
 ### Overview
 
-Add support for three additional agent harnesses as separate Takopi runners.
+Add support for eight additional agent harnesses as separate Takopi runners.
 
-### General Approach (applies to all three)
+### General Approach (applies to all eight)
 
 For each new agent, follow this workflow:
 
@@ -157,6 +157,24 @@ For each new agent, follow this workflow:
 - CLI tool: `kilo` (or `kilo-code`)
 - Investigate: CLI interface, output format, session/resume, MCP support.
 - Config table: `[kilo]` with model, extra_args, etc.
+
+### 4d. Mimo Code
+
+- CLI tool: `mimo` (or `mimo-code`)
+- Investigate: CLI interface, output format (JSON streaming?), session/resume mechanism, plan-mode support, MCP support.
+- Config table: `[mimo]` with model, extra_args, etc.
+
+### 4e. ZCode
+
+- CLI tool: `zcode` (Z.AI coding agent)
+- Investigate: CLI interface, output format, session/resume mechanism, model/profile selection flags, MCP support.
+- Config table: `[zcode]` with model, extra_args, etc.
+
+### 4f. Kimi Code
+
+- CLI tool: `kimi` (Moonshot AI coding agent)
+- Investigate: CLI interface, output format, session/resume mechanism, model selection, plan-mode support, MCP support.
+- Config table: `[kimi]` with model, extra_args, etc.
 
 ### Scope per agent
 
