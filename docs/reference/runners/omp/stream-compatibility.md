@@ -101,7 +101,13 @@ The sanitized probe is at `probes/stream-retry-notice.jsonl`.
   succeeds. The translated `CompletedEvent(ok=False)` flows through the shared
   `JsonlSubprocessRunner.run_impl()` failure path. Because prior
   start/action/answer output makes replay unsafe, the result is one clean
-  failed completion — no retry.
+  failed completion — no retry. **Proven shared defect:** the OMP
+  `errorMessage` text starts with a bare `503` prefix
+  (`"503 Chat admission capacity..."`) with no `http`/`status` keyword, so
+  the existing `_extract_http_status` regex did not match — the failure was
+  classified as transient (via phrase matching) but with `http_status=None`,
+  producing `"omp upstream is temporarily unavailable: ..."` without the
+  `(HTTP 503)` suffix. Fixed by adding a bare-prefix `429|503` pattern.
 
 ## Compatibility boundary (after Task 22)
 

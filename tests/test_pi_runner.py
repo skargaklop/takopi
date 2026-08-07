@@ -647,3 +647,109 @@ def test_build_runner_wires_detection(monkeypatch: pytest.MonkeyPatch) -> None:
     runner = pi_module.build_runner({}, Path("takopi.toml"))
     assert isinstance(runner, PiRunner)
     assert runner.plan_mode_extension is False
+
+
+@pytest.mark.anyio
+async def test_omp_capacity_fixture_clean_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Exact OMP OmniRoute capacity fixture produces one clean failed completion.
+
+    Feeds omp_stream_capacity_error.jsonl through OmpRunner.run_impl() with a
+    fake process that exits rc=0 and empty stderr. The shared
+    JsonlSubprocessRunner orchestration (not the classifier directly) must:
+
+    - emit one StartedEvent with the full OMP session ID;
+    - preserve pre-terminal tool/answer/usage events;
+    - produce exactly one CompletedEvent(ok=False) with the shared clean form;
+    - NOT retry (prior start/action/answer output makes replay unsafe);
+    - NOT emit a generic ``omp failed``/``finished without agent_end`` warning.
+    """
+    from collections.abc import AsyncIterator
+
+    from takopi import runner as runner_module
+
+    fixture_path = (
+        Path(__file__).parent / "fixtures" / "omp_stream_capacity_error.jsonl"
+    )
+    fixture_lines = [
+        line.encode() for line in fixture_path.read_text().splitlines() if line.strip()
+    ]
+
+    class _FakeProc:
+        def __init__(self) -> None:
+            self.stdout = object()
+            self.stderr = object()
+            self.stdin = None
+            self.pid = 9999
+
+        async def wait(self) -> int:
+            return 0  # rc=0: transport success despite agent-run failure
+
+    class _FakeManager:
+        def __init__(self, proc: _FakeProc) -> None:
+            self._proc = proc
+
+        async def __aenter__(self) -> _FakeProc:
+            return self._proc
+
+        async def __aexit__(self, exc_type, exc, tb) -> None:
+            return None
+
+    spawn_count = 0
+    proc = _FakeProc()
+
+    def fake_manage_subprocess(*args: object, **kwargs: object) -> _FakeManager:
+        nonlocal spawn_count
+        spawn_count += 1
+        return _FakeManager(proc)
+
+    async def fake_drain_stderr(*args: object, **kwargs: object) -> None:
+        return None
+
+    monkeypatch.setattr(runner_module, "manage_subprocess", fake_manage_subprocess)
+    monkeypatch.setattr(runner_module, "drain_stderr", fake_drain_stderr)
+
+    runner = OmpRunner(extra_args=[], model=None, provider=None)
+
+    # Override iter_json_lines to yield fixture lines through real Pi decoder
+    async def fake_iter_json_lines(self, stream: object) -> AsyncIterator[bytes]:
+        _ = self, stream
+        for line in fixture_lines:
+            yield line
+
+    monkeypatch.setattr(type(runner), "iter_json_lines", fake_iter_json_lines)
+
+    events = [evt async for evt in runner.run_impl("test prompt", None)]
+
+    # Exactly one process spawned (no retry after visible output)
+    assert spawn_count == 1, f"expected 1 spawn, got {spawn_count}"
+
+    # One StartedEvent with full session ID
+    started_events = [e for e in events if isinstance(e, StartedEvent)]
+    assert len(started_events) == 1
+    assert started_events[0].resume is not None
+    assert started_events[0].resume.engine == OMP_ENGINE
+    full_id = "019fd7f2-d1dd-7000-97dd-dc3d5627ab43"
+    assert started_events[0].resume.value == full_id
+
+    # Exactly one CompletedEvent(ok=False)
+    completed = [e for e in events if isinstance(e, CompletedEvent)]
+    assert len(completed) == 1
+    assert completed[0].ok is False
+
+    # Clean error form (shared format_transient_failure output)
+    assert completed[0].error is not None
+    assert completed[0].error.startswith(
+        "omp upstream is temporarily unavailable (HTTP 503):"
+    )
+    # Substantive reason present
+    assert "Chat admission capacity is temporarily unavailable" in completed[0].error
+    # No raw JSON, retry-after-ms, rc=, or Internal error leakage
+    assert "{" not in completed[0].error
+    assert "retry-after-ms" not in completed[0].error.lower()
+    assert "Internal error" not in completed[0].error
+    assert "rc=" not in completed[0].error
+    # No duplicated reason text
+    reason = "Chat admission capacity is temporarily unavailable"
+    assert completed[0].error.count(reason) == 1

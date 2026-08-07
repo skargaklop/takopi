@@ -819,3 +819,52 @@ async def test_cancellation_during_backoff_aborts(
     finally:
         runner_module.manage_subprocess = original_manage  # type: ignore[assignment]
         runner_module.drain_stderr = original_drain  # type: ignore[assignment]
+
+
+@pytest.mark.anyio
+async def test_retry_pre_start_rc0_stream_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A transient failed completion before any visible output with rc=0 retries.
+
+    Existing tests cover nonzero-stderr retries and post-start rc=0 failures.
+    This covers the gap: a failed CompletedEvent emitted from the stream itself
+    (not stderr), process exits 0, no StartedEvent/ActionEvent/answer emitted.
+    The shared retry path should retry once, then succeed.
+    """
+    original_manage = runner_module.manage_subprocess
+    original_drain = runner_module.drain_stderr
+    try:
+        runner = _make_attempt_runner(
+            [
+                (
+                    [
+                        b'{"type": "completed", "ok": false, '
+                        b'"error": "503 Chat admission capacity '
+                        b'is temporarily unavailable. Retry shortly."}',
+                    ],
+                    0,  # rc=0: transport success despite stream failure
+                    [],
+                ),
+                (
+                    [b'{"type": "completed", "ok": true, "answer": "ok"}'],
+                    0,
+                    [],
+                ),
+            ]
+        )
+        events = [evt async for evt in runner.run_impl("hello", None)]
+    finally:
+        runner_module.manage_subprocess = original_manage  # type: ignore[assignment]
+        runner_module.drain_stderr = original_drain  # type: ignore[assignment]
+
+    notes = [
+        evt
+        for evt in events
+        if isinstance(evt, ActionEvent) and "retrying in" in (evt.action.title or "")
+    ]
+    completions = [evt for evt in events if isinstance(evt, CompletedEvent)]
+    assert len(notes) == 1  # one shared retry note
+    assert len(completions) == 1
+    assert completions[0].ok is True
+    assert completions[0].answer == "ok"

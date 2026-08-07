@@ -36,11 +36,22 @@ _NON_TRANSIENT_MARKERS: tuple[str, ...] = (
 )
 
 _HTTP_STATUS_RE = re.compile(r"(?i)\b(?:http|status)\s*(\d{3})\b")
+# OMP/OmniRoute stream errors start with a bare ``503``/``429`` prefix:
+# ``503 Chat admission capacity is temporarily unavailable.`` with no
+# ``http``/``status`` keyword. Match only the two transient codes to avoid
+# false positives from unrelated numbers elsewhere in the message.
+_BARE_STATUS_PREFIX_RE = re.compile(r"^\s*(429|503)\b")
+_RETRY_AFTER_MS_RE = re.compile(r"(?i)\s*retry-after-ms\s*=\s*\d+\s*")
+# OMP terminal errors duplicate the capacity reason with different suffixes:
+# ``...Retry shortly. retry-after-ms=2000\n...Retry shortly. (type=... param=...)``
+# Strip the ``(type=... param=...)`` provider suffix and any text after it,
+# then collapse any remaining exact-phrase duplication.
+_PROVIDER_SUFFIX_RE = re.compile(r"(?i)\s*\(type=[^)]*param=[^)]*\)\s*.*$")
+_RETRY_DIRECTIVE_RE = re.compile(
+    r"(?i)\s*(?:retry\s+shortly|try\s+again\s+later)\.?\s*"
+)
 _INTERNAL_ERROR_PREFIX_RE = re.compile(r"(?is)^\s*internal\s+error\s*:\s*")
 _API_ERROR_RE = re.compile(r"(?is)\bAPI\s+error\s*\(\s*status\s+(\d{3})[^)]*\)\s*:\s*")
-_RETRY_DIRECTIVE_RE = re.compile(
-    r"(?i)\s*(?:retry\s+shortly|try\s+again\s+later)\.?\s*$"
-)
 _WHITESPACE_RE = re.compile(r"\s+")
 
 
@@ -62,6 +73,9 @@ def _extract_http_status(text: str) -> int | None:
         status = int(match.group(1))
         if status in (429, 503):
             return status
+    bare = _BARE_STATUS_PREFIX_RE.match(text)
+    if bare:
+        return int(bare.group(1))
     return None
 
 
@@ -79,14 +93,27 @@ def _clean_reason(message: str, http_status: int | None) -> str:
     """Strip provider wrappers and duplicate retry advice from a reason string."""
     # Remove a leading "API error (status N ...):" provider wrapper.
     message = _API_ERROR_RE.sub("", message, count=1)
-    # Remove a trailing retry directive so the formatted output's own
-    # "Try again in a few minutes." is not duplicated.
+    # Strip a leading bare ``503``/``429`` status prefix (OMP errorMessage
+    # format: ``503 Chat admission capacity...``); the status is already
+    # captured in ``http_status`` for the formatted wrapper.
+    message = _BARE_STATUS_PREFIX_RE.sub("", message, count=1)
+    message = _RETRY_AFTER_MS_RE.sub(" ", message)
+    # Remove ALL retry directives (OMP duplicates them mid-message).
     message = _RETRY_DIRECTIVE_RE.sub("", message)
     message = _WHITESPACE_RE.sub(" ", message).strip()
-    if not message:
-        message = "Upstream capacity is temporarily unavailable."
-    if not message.endswith("."):
-        message += "."
+    # Strip OMP provider suffix ``(type=... param=...)`` and everything after.
+    message = _PROVIDER_SUFFIX_RE.sub("", message).strip()
+    # Collapse duplicate sentences/phrases (OMP repeats the capacity message
+    # on separate lines with different suffixes).
+    parts = [p.strip() for p in message.split(".") if p.strip()]
+    seen: set[str] = set()
+    unique: list[str] = []
+    for p in parts:
+        key = p.lower()
+        if key not in seen:
+            seen.add(key)
+            unique.append(p)
+    message = ". ".join(unique)
     # Capitalize the first letter without touching the rest (acronyms, URLs).
     if message and not message[0].isupper():
         message = message[0].upper() + message[1:]
