@@ -216,7 +216,7 @@ Root-cause hypothesis: runner subprocesses are killed (`taskkill /T /F` in `mana
 - `docs/reference/shutdown/` - saved findings
 ---
 
-## Task 6: Real Compaction for ACP Runners (grok, omp)
+## Task 6: Real Compaction for ACP Runners (grok, omp) — DONE
 
 ### Problem
 
@@ -241,6 +241,11 @@ The `acp` compact mode introduced in `f23baba` is a test-only stub: the only tra
 - `src/takopi/runners/omp.py`, `grok.py` - `create_acp_client` overrides, support re-declaration
 - `tests/test_acp_client.py`, `tests/test_acp_compact_runners.py`
 - `docs/reference/runners/omp/`, `docs/reference/runners/grok/`
+
+### Outcome
+
+Implemented in `3531b9a` (`feat: Implement production ACP transport and clean up types`). `SubprocessAcpTransport` now provides production newline-delimited JSON-RPC over stdio with request correlation, update notification handling, subprocess cleanup, and ACP factory coverage for Grok and OMP. The live compaction probes are installed and independently skippable when session IDs are unavailable. Grok and OMP correctly remain `handoff_only` until their harness-specific live interception evidence passes; this is an honest capability gate, not an unfinished transport implementation.
+
 ---
 
 ## Task 7: `/handoff` Command for All Engines (DONE)
@@ -644,7 +649,7 @@ Completed through the shared transient-failure implementation in `93ba186`. The 
 
 ---
 
-## Task 18: Resolve All ty Type-Checker Diagnostics
+## Task 18: Resolve All ty Type-Checker Diagnostics — DONE
 
 ### Problem
 
@@ -674,6 +679,10 @@ loose dict key types) that `ty` catches but the test suite doesn't.
 
 - `src/takopi/` (multiple modules)
 - `tests/` (test annotations)
+
+### Outcome
+
+Completed in `3531b9a`. All 41 reported diagnostics were corrected at the source using structural protocols, type narrowing, and corrected return/assignment contracts. No `# type: ignore`, `cast(Any, ...)`, or type-checker rule weakening was used. The zero-diagnostic checkpoint is recorded in `changelog.md` and `docs/plans/2026-08-07-tasks-18-and-6-plan.md`.
 
 ---
 
