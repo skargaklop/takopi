@@ -71,7 +71,10 @@ docs = [
 
 [tool.pytest.ini_options]
 addopts = ["--cov=takopi", "--cov-branch", "--cov-report=term-missing", "--cov-fail-under=81"]
-markers = ["live_acp: requires a live ACP-capable CLI and an existing session ID env var"]
+markers = [
+    "live_acp: requires a live ACP-capable CLI and an existing session ID env var",
+    "live_omp: requires the omp CLI on PATH and exercises a real OMP JSONL stream",
+]
 testpaths = ["tests"]
 
 [tool.mutmut]
