@@ -29,6 +29,7 @@ nav = [
     { "Topics" = "how-to/topics.md" },
     { "Voice notes" = "how-to/voice-notes.md" },
     { "File transfer" = "how-to/file-transfer.md" },
+    { "Long Telegram prompts" = "how-to/long-telegram-prompts.md" },
     { "Schedule tasks" = "how-to/schedule-tasks.md" },
     { "Troubleshooting" = "how-to/troubleshooting.md" },
     { "Write a plugin" = "how-to/write-a-plugin.md" },

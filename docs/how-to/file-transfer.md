@@ -89,7 +89,39 @@ Send:
 
 Directories are zipped automatically.
 
+## Run a file-backed task
+
+When `auto_put_mode = "prompt"` (see [Enable file transfer](#enable-file-transfer)),
+uploading a **non-image** document (text, code, PDF, markdown, etc.) saves it
+into the active project and instructs the agent to execute whatever the file
+contains. The run prompt becomes:
+
+```
+Execute the task specified in this file: `incoming/<filename>`.
+```
+
+Any caption you add is prepended, so:
+
+```
+/codex
+(attached: plan.md)
+```
+
+yields:
+
+```
+/codex
+
+Execute the task specified in this file: `incoming/plan.md`.
+```
+
+This is the recommended path for long structured prompts — a spec, a runbook,
+a multi-section plan — that are easier to author as a file than as an inline
+message. Combine with [prompt batching](./long-telegram-prompts.md) when you
+also want to send a short inline lead-in.
+
 ## Related
 
 - [Commands & directives](../reference/commands-and-directives.md)
 - [Config reference](../reference/config.md)
+- [Long Telegram prompts](./long-telegram-prompts.md)

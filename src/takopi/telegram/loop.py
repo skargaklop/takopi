@@ -2385,7 +2385,7 @@ async def run_main_loop(
                 if is_img:
                     annotation = format_image_prompt_annotation([rel])
                 else:
-                    annotation = f"[uploaded file: {rel}]"
+                    annotation = f"Execute the task specified in this file: `{rel}`."
                 prompt = _build_upload_prompt(resolved.prompt, annotation)
                 abs_path = str((saved.run_root / saved.rel_path).resolve())
                 attachments = (
