@@ -862,6 +862,8 @@ jsonl.msgspec.invalid: Invalid value 'notice' - at `$.type`
 
 The warnings occurred repeatedly during resume `019fd7f2`, so valid progress/event data may have been dropped. The run eventually exited with `rc=0` but completed as `ok=False` after 36 minutes with `503 Chat admission capacity is temporarily unavailable`. Tasks 14 and 17 now cleanly classify transient capacity errors, but they do not fix schema loss or establish that the OMP queue/run path survives new event variants.
 
+Separately, the Telegram progress/session label for `omp` shows only the first part of the session id before the first dash (`019fd7f2` instead of the full id `019fd7f2-…`). Root cause (code-verified): `_short_session_id()` in `src/takopi/runners/pi.py` truncates UUID session ids at the first `-`; `OmpRunner` inherits this truncation from `PiRunner`, so the full session id is never visible to the user.
+
 ### Requirements
 
 0. Come up with an alternative system for long prompts—saving them to a file using takopi tools and sending a prompt to the agent in the form of “Execute the task specified in this file.”
@@ -871,14 +873,16 @@ The warnings occurred repeatedly during resume `019fd7f2`, so valid progress/eve
 4. Ensure OMP terminal 503/capacity events reach the shared transient-failure classifier and produce one clean user-facing message; no raw JSON and no duplicate retry/error messages. Verify behavior when `rc=0` but the terminal event reports failure.
 5. Add fixture-based tests for float `delayMs`, `notice`, unknown event types, preserved tool/answer events, and the exact capacity-failure stream. Add a marked live OMP smoke test where credentials/CLI are available.
 6. Check all Pi-protocol consumers and engines using the decoder so the fix does not regress pi, and document the compatibility boundary for omp.
+7. **Full session id in Telegram (no trim):** the `omp` session label must show the FULL session id (e.g. `019fd7f2-…` in full), never the truncated first segment before the dash. Remove or bypass the `_short_session_id()` dash-split truncation for `omp`; confirm `format_resume()`, the progress footer, and any session-name renderer all emit the complete id. Verify whether truncation is safe/desired for `pi` itself and keep pi behavior unchanged unless the same full-id requirement applies.
 
 ### Investigation Steps
 
 1. Capture and archive the exact OMP stream from the reported scenario, including stdout/stderr and exit status.
 2. Trace schema dispatch in `src/takopi/runners/pi.py` and `src/takopi/schemas/pi.py`, then compare it with OMP's documented/native event protocol.
 3. Confirm whether dropped `notice` events affect progress, queue completion, answer delivery, or only optional telemetry.
-4. Write an implementation plan in `docs/plans/` and implement via TDD.
-5. Run pytest, ruff, type checks, and a live OMP smoke test when available.
+4. Trace where the session id is shortened (`_short_session_id()` in `src/takopi/runners/pi.py`), confirm it reaches Telegram via `format_resume()`/progress footer, and verify full-id round-trip for `omp --resume`.
+5. Write an implementation plan in `docs/plans/` and implement via TDD.
+6. Run pytest, ruff, type checks, and a live OMP smoke test when available.
 
 ### Plan
 
@@ -887,7 +891,9 @@ The warnings occurred repeatedly during resume `019fd7f2`, so valid progress/eve
 ### Scope
 
 - `src/takopi/schemas/pi.py`, `src/takopi/runners/pi.py`, `src/takopi/runners/omp.py`
+- `src/takopi/runners/pi.py` — `_short_session_id()` full-id behavior for omp (session-label truncation)
 - `tests/fixtures/omp_*.jsonl`, `tests/test_pi_schema.py`, `tests/test_pi_runner.py`, OMP runner tests
+- `tests/test_pi_runner.py` / new OMP runner tests — full-session-id formatting regression tests
 - `docs/reference/runners/omp/`, `docs/reference/runners/pi/`
 - `changelog.md`
 
