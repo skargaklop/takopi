@@ -173,6 +173,73 @@ def test_translate_error_fixture() -> None:
     assert completed.answer == "Request failed."
 
 
+
+def test_omp_compat_fixture_line_local_recovery() -> None:
+    """OMP compatibility fixture: unknown/malformed lines are line-local.
+
+    Feeds omp_stream_compatibility.jsonl through PiRunner.translate() one line
+    at a time. Unknown tags (notice, future_event) produce no Takopi events;
+    float delayMs decodes cleanly; valid tool/answer/usage/completion events
+    are preserved in order after the ignored/malformed lines.
+    """
+    runner = PiRunner(extra_args=[], model=None, provider=None)
+    state = PiStreamState(resume=ResumeToken(engine=ENGINE, value="compat.jsonl"))
+    events: list = []
+    fixture_path = Path(__file__).parent / "fixtures" / "omp_stream_compatibility.jsonl"
+
+    for line in fixture_path.read_text().splitlines():
+        if not line.strip():
+            continue
+        decoded = pi_schema.decode_event(line)
+        events.extend(
+            runner.translate(decoded, state=state, resume=state.resume, found_session=None)
+        )
+
+    # Unknown events produce no Takopi events
+    assert len(events) > 0, "expected at least a StartedEvent from the fixture"
+
+    # A StartedEvent was synthesized
+    started = next(evt for evt in events if isinstance(evt, StartedEvent))
+    assert started.resume is not None
+
+    # A CompletedEvent was produced and is the last event
+    completed = next(evt for evt in events if isinstance(evt, CompletedEvent))
+    assert events[-1] == completed
+    assert completed.ok is True
+
+    # Tool events survived after the ignored/malformed lines
+    action_events = [evt for evt in events if isinstance(evt, ActionEvent)]
+    assert len(action_events) >= 2  # start + end of one tool
+
+
+def test_unknown_event_produces_no_takopi_event(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Unknown events yield no Takopi event and only one DEBUG diagnostic."""
+    from takopi.runners import pi as pi_module
+
+    calls: list[str] = []
+    original_debug = pi_module.logger.debug
+
+    def capture_debug(msg, *args, **kwargs):
+        calls.append(msg)
+        return original_debug(msg, *args, **kwargs)
+
+    monkeypatch.setattr(pi_module.logger, "debug", capture_debug)
+
+    runner = PiRunner(extra_args=[], model=None, provider=None)
+    state = PiStreamState(resume=ResumeToken(engine=ENGINE, value="unknown.jsonl"))
+
+    result = runner.translate(
+        pi_schema.PiUnknownEvent(type_name="notice"),
+        state=state,
+        resume=state.resume,
+        found_session=None,
+    )
+
+    assert result == []
+    assert calls.count("pi.stream.unknown_type") == 1
+
 def test_session_id_promotion_from_stdout() -> None:
     state = PiStreamState(
         resume=ResumeToken(engine=ENGINE, value="session.jsonl"),

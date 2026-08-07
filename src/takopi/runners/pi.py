@@ -459,6 +459,13 @@ class PiRunner(SlashCompactMixin, ResumeTokenMixin, JsonlSubprocessRunner):
         resume: ResumeToken | None,
         found_session: ResumeToken | None,
     ) -> list[TakopiEvent]:
+        if isinstance(data, pi_schema.PiUnknownEvent):
+            self.get_logger().debug(
+                "pi.stream.unknown_type",
+                tag=self.tag(),
+                type_name=data.type_name,
+            )
+            return []
         meta: dict[str, Any] = {"cwd": os.getcwd()}
         if self.model:
             meta["model"] = self.model
