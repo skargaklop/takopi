@@ -1,7 +1,14 @@
 # changelog
 
 ## unreleased
+### reliable queued-message cancellation
 
+- exact per-message queued Cancel: removes only the job keyed by its progress message, edits the card to a terminal cancelled state, never starts its subprocess, and is idempotent for stale/repeated callbacks.
+- discriminated cancel results: `cancel_queued()` returns `CANCELLED | ALREADY_CLAIMED | NOT_FOUND` instead of `ThreadJob | None`, so handlers answer honestly (dropped, already started, nothing queued) without misrouting into the active run.
+- scheduler claim boundary: the worker moves a job from pending to a bounded claimed index, fires `on_job_claimed` (Telegram edits the card to `starting`), and removes it on completion — cancellation after claim answers `already started` without touching the predecessor.
+- visible failure feedback: `on_job_failed` edits the affected card to a terminal error with sanitized detail and prompt preview. Enqueue failure rolls back scheduler state and edits the sent card to error — no silent loss.
+- enqueue disposition: `enqueue()`/`enqueue_resume()` return `QUEUED | CLAIMABLE` for state reconciliation without a separate `is_busy()` race.
+- cross-engine queue isolation verified for codex, claude, and pi with parametrized integration tests; no engine allowlist in scheduler logic.
 ### omp/pi stream compatibility
 
 - forward-compatible Pi/OMP stream decoding: unknown-but-valid `type` tags (e.g. `notice`, `auto_retry_start`) now decode to `PiUnknownEvent` and produce one DEBUG diagnostic per line instead of raising `jsonl.msgspec.invalid`. Known event structs remain strict. Malformed lines stay line-local — the decoder skips the bad line and continues translating later events.

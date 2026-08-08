@@ -108,8 +108,12 @@ Allowed extensions come from `send_extensions` (default: jpg/png/gif/pdf/md/html
 ### Queue & steer (progress buttons)
 
 - While a thread is busy, new messages on that thread are **queued** (FIFO). Progress shows label `queued`.
-- **cancel** drops a queued job or cancels the active run.
+- **cancel** drops exactly the selected queued job (editing its card to a terminal cancelled state) or cancels the active run if the message has already been claimed.
 - **steer** injects a queued prompt into the **active** turn when the runner exposes turn control (**Codex only** today). For other engines the button is omitted; the job stays queued until the active run finishes.
+- `/queue` reports scheduler truth: `queued: N` counts pending jobs for the resolved engine/session; `busy: yes` while a job is running.
+- Queued Cancel is **per-message**: it removes only the job keyed by that progress message and never starts its subprocess. Stale or repeated callbacks are harmless (idempotent).
+- After the worker claims a queued job, the card transitions to the active run; a late Cancel answers "already started" without affecting the predecessor.
+- Enqueue failures and unexpected worker failures produce a visible terminal error on the affected card — no silent loss.
 
 Notes:
 
