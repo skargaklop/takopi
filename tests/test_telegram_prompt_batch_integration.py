@@ -757,3 +757,134 @@ async def test_prompt_batch_disabled_no_join() -> None:
     await run_main_loop(cfg, poller)
 
     assert [call[0] for call in runner.calls] == ["one", "two"]
+
+# ---------------------------------------------------------------------------
+# Task 21: Cross-engine queue cancellation and isolation
+# ---------------------------------------------------------------------------
+
+_ENGINES = ["codex", "claude", "pi"]
+
+
+@pytest.mark.anyio
+@pytest.mark.parametrize("engine", _ENGINES)
+async def test_queue_behind_busy_run_per_engine(engine: str) -> None:
+    """For each engine, a prompt queued behind a busy run waits and runs FIFO."""
+    hold = anyio.Event()
+    progress_ready = anyio.Event()
+    transport = FakeTransport(progress_ready=progress_ready)
+    runner = ScriptRunner(
+        [Wait(hold), Return(answer="active"), Return(answer="queued")],
+        engine=engine,
+        resume_value="sid",
+    )
+    cfg = make_cfg(
+        transport,
+        runner=runner,
+        prompt_batch_enabled=False,
+    )
+    expected_token = ResumeToken(engine=engine, value="sid")
+
+    async def poller(_cfg: TelegramBridgeConfig):
+        yield _msg(1, "start active run")
+        await progress_ready.wait()
+        assert transport.progress_ref is not None
+        reply_id = transport.progress_ref.message_id
+
+        yield _msg(2, "queued prompt", reply_to_message_id=reply_id)
+        await anyio.sleep(0.06)
+
+        # The queued prompt must NOT have started yet.
+        assert len(runner.calls) == 1
+
+        hold.set()
+        await anyio.sleep(0.06)
+
+    await run_main_loop(cfg, poller)
+
+    assert len(runner.calls) == 2
+    assert runner.calls[0][0] == "start active run"
+    assert runner.calls[1][0] == "queued prompt"
+    # The first call has resume=None (new run); the queued call carries the token.
+    assert runner.calls[1][1] == expected_token
+
+
+@pytest.mark.anyio
+async def test_queue_isolation_between_engines_same_session() -> None:
+    """Different engines with the same session value run concurrently."""
+    hold_a = anyio.Event()
+    hold_b = anyio.Event()
+    progress_ready_a = anyio.Event()
+    transport = FakeTransport(progress_ready=progress_ready_a)
+    runner_a = ScriptRunner(
+        [Wait(hold_a), Return(answer="a")], engine="codex", resume_value="shared"
+    )
+    runner_b = ScriptRunner(
+        [Wait(hold_b), Return(answer="b")], engine="claude", resume_value="shared"
+    )
+    cfg = make_multi_runner_cfg(
+        transport,
+        [runner_a, runner_b],
+        prompt_batch_enabled=False,
+    )
+
+    async def poller(_cfg: TelegramBridgeConfig):
+        yield _msg(1, "/codex start")
+        await progress_ready_a.wait()
+        assert transport.progress_ref is not None
+
+        yield _msg(2, "/claude start")
+        await anyio.sleep(0.1)
+
+        assert len(runner_a.calls) == 1
+        assert len(runner_b.calls) == 1
+
+        hold_a.set()
+        hold_b.set()
+
+    await run_main_loop(cfg, poller)
+
+    assert runner_a.calls[0][0] == "start"
+    assert runner_b.calls[0][0] == "start"
+    # Both runners were invoked concurrently (isolation: different engines
+    # with the same session value "shared" are separate thread keys).
+    assert len(runner_a.calls) == 1
+    assert len(runner_b.calls) == 1
+
+
+@pytest.mark.anyio
+async def test_queue_fifo_ordering_with_claim_transition() -> None:
+    """After the active run finishes, queued prompts run FIFO with correct tokens."""
+    hold = anyio.Event()
+    progress_ready = anyio.Event()
+    transport = FakeTransport(progress_ready=progress_ready)
+    runner = ScriptRunner(
+        [Wait(hold), Return(answer="first"), Return(answer="second")],
+        engine=CODEX_ENGINE,
+        resume_value="sid",
+    )
+    cfg = make_cfg(
+        transport,
+        runner=runner,
+        prompt_batch_enabled=False,
+    )
+
+    async def poller(_cfg: TelegramBridgeConfig):
+        yield _msg(1, "active")
+        await progress_ready.wait()
+        assert transport.progress_ref is not None
+        reply_id = transport.progress_ref.message_id
+
+        yield _msg(2, "first", reply_to_message_id=reply_id)
+        yield _msg(3, "second", reply_to_message_id=reply_id)
+        await anyio.sleep(0.06)
+
+        assert len(runner.calls) == 1
+        hold.set()
+        await anyio.sleep(0.1)
+
+    await run_main_loop(cfg, poller)
+    assert len(runner.calls) == 3
+    assert [c[0] for c in runner.calls] == ["active", "first", "second"]
+    # First call has resume=None (new run); queued calls carry the token.
+    assert runner.calls[1][1] == ResumeToken(engine=CODEX_ENGINE, value="sid")
+    assert runner.calls[2][1] == ResumeToken(engine=CODEX_ENGINE, value="sid")
