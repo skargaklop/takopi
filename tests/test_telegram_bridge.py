@@ -41,7 +41,7 @@ from takopi.markdown import MarkdownPresenter
 from takopi.model import ResumeToken
 from takopi.progress import ProgressTracker
 from takopi.router import AutoRouter, RunnerEntry
-from takopi.scheduler import ThreadScheduler
+from takopi.scheduler import CancelQueuedStatus, ThreadScheduler
 from takopi.transport_runtime import TransportRuntime
 from takopi.runners.mock import Return, ScriptRunner, Sleep, Wait
 from takopi.telegram.types import (
@@ -795,7 +795,8 @@ async def test_handle_cancel_cancels_queued_job() -> None:
     cancelled_text = transport.edit_calls[0]["message"].text.lower()
     assert "cancelled" in cancelled_text
     assert "codex resume sid" in cancelled_text
-    assert await scheduler.cancel_queued(123, progress_ref.message_id) is None
+    stale = await scheduler.cancel_queued(123, progress_ref.message_id)
+    assert stale.status is CancelQueuedStatus.NOT_FOUND
 
 
 @pytest.mark.anyio
@@ -1048,7 +1049,8 @@ async def test_handle_callback_steer_sends_queued_text_to_active_turn() -> None:
         transport.edit_calls[0]["message"].extra["reply_markup"]["inline_keyboard"]
         == []
     )
-    assert await scheduler.cancel_queued(123, progress_ref.message_id) is None
+    stale = await scheduler.cancel_queued(123, progress_ref.message_id)
+    assert stale.status is CancelQueuedStatus.NOT_FOUND
     bot = cast(FakeBot, cfg.bot)
     assert bot.callback_calls
     assert bot.callback_calls[-1]["text"] == "steered active turn."
