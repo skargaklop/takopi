@@ -1,7 +1,7 @@
-"""Live OMP JSONL stream smoke test.
+"""Opt-in live OMP JSONL stream smoke test.
 
-Requires the ``omp`` CLI on PATH. Skipped otherwise (or when explicitly
-deselected via ``-m "not live_omp"``).
+Requires ``TAKOPI_OMP_LIVE=1``, the ``omp`` CLI on PATH, and a configured
+OMP provider. Deselect with ``-m \"not live_omp\"`` when desired.
 
 Validates that a real OMP stream:
 
@@ -29,8 +29,8 @@ pytestmark = pytest.mark.live_omp
 
 
 @pytest.mark.skipif(
-    omp is None,
-    reason="omp CLI not found on PATH",
+    omp is None or os.environ.get("TAKOPI_OMP_LIVE") != "1",
+    reason="requires TAKOPI_OMP_LIVE=1 and the omp CLI on PATH",
 )
 @pytest.mark.anyio
 async def test_omp_live_stream_decodes_and_preserves_session_id() -> None:

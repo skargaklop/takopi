@@ -810,7 +810,7 @@ Task 13 was the proof-of-concept for ONE harness. This task brings the remaining
 
 ---
 
-## Task 21: Reliable Queued-Message Cancellation and Cross-Engine Queueing
+## Task 21: Reliable Queued-Message Cancellation and Cross-Engine Queueing (DONE)
 
 ### Problem
 
@@ -836,7 +836,15 @@ A live Telegram status showed `thread: omp:019fd7f2 busy: yes queued: 0`, but th
 
 ### Plan
 
-- TBD: reproduce the `omp` queue/cancel path first; the approved plan must include the all-engine matrix and identified root cause.
+Implemented 2026-08-08 under `docs/plans/2026-08-07-queued-message-cancellation.md`. Root cause: Telegram rendered queue state from a non-atomic busy sample while the scheduler did not expose pending-versus-claimed lifecycle state, so queued cards could lose controls and stale callbacks had no truthful result.
+
+- **Scheduler-owned lifecycle** (`e95a2a9`): explicit enqueue/cancel results, exact `(chat_id, progress_message_id)` cancellation, atomic pending→claimed transfer, rollback on worker-start failure, and isolated claim/failure observers.
+- **Exact, idempotent Telegram cancellation** (`01c6c89`): queued cancellation updates only the selected card; claimed/stale callbacks report honest no-op state and never cancel a predecessor.
+- **Card ownership and visible failures** (`a33ed4f`): claim/failure observers edit the same progress card; enqueue and unexpected worker failures render terminal errors with controls cleared.
+- **Runtime-generic integration coverage** (`68ce07d`) and **documented contract** (`ec1ea7a`): FIFO, queue counts, cross-engine/session isolation, runtime-discovered engines, and steering remain verified without an engine allowlist.
+- **Final lifecycle and shutdown coverage**: deterministic race/observer/rollback tests plus subprocess completion, signal, process-tree, and close-path coverage; the live OMP smoke is explicitly opt-in via `TAKOPI_OMP_LIVE=1` so an installed but unconfigured CLI cannot block the deterministic suite.
+
+Verification (Windows, Python 3.14): `ruff format --check .`, `ruff check .`, and `ty check src tests` clean; mandatory lifecycle gate `184 passed`; full no-coverage suite `1105 passed, 4 skipped`; coverage suite `1109 passed, 4 skipped`, **81.03%** (81% gate); strict Zensical build passed before this final roadmap record. Known Windows `.pytest_cache` warning and a pre-existing Proactor deallocator warning emitted by intentional scheduler-observer failure tests remain non-failing warnings.
 
 ### Scope
 

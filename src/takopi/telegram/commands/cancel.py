@@ -71,9 +71,7 @@ async def handle_callback_cancel(
     running_task = running_tasks.get(progress_ref)
     if running_task is None:
         if scheduler is not None:
-            result = await scheduler.cancel_queued(
-                query.chat_id, query.message_id
-            )
+            result = await scheduler.cancel_queued(query.chat_id, query.message_id)
             if result.status is CancelQueuedStatus.CANCELLED and result.job is not None:
                 logger.info(
                     "cancel.queued",

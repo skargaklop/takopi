@@ -6,7 +6,7 @@ noise.
 """
 
 from __future__ import annotations
-
+from typing import cast
 import subprocess
 import sys
 import time
@@ -16,8 +16,128 @@ from pathlib import Path
 import anyio
 import pytest
 from anyio import BrokenResourceError, ClosedResourceError
+from anyio.abc import Process
 
-from takopi.utils.subprocess import DEFAULT_SHUTDOWN_TIMEOUT_S, close_process_streams
+from takopi.utils import subprocess as subprocess_utils
+from takopi.utils.subprocess import (
+    DEFAULT_SHUTDOWN_TIMEOUT_S,
+    close_process_streams,
+    kill_process,
+    kill_process_tree,
+    terminate_process,
+    wait_for_process,
+)
+
+
+@pytest.mark.anyio
+async def test_wait_for_process_reports_completion_and_timeout() -> None:
+    """wait_for_process distinguishes a completed wait from timeout."""
+
+    class WaitingProcess:
+        async def wait(self) -> None:
+            return None
+
+    assert (
+        await wait_for_process(cast("Process", WaitingProcess()), timeout=1.0) is False
+    )
+
+    class HangingProcess:
+        async def wait(self) -> None:
+            await anyio.sleep(1.0)
+
+    assert (
+        await wait_for_process(cast("Process", HangingProcess()), timeout=0.001) is True
+    )
+
+
+class SignalProcess:
+    """Small process double for shutdown signal behavior."""
+
+    def __init__(self, *, pid: int | None = 123, returncode: int | None = None) -> None:
+        self.pid = pid
+        self.returncode = returncode
+        self.terminated = False
+        self.killed = False
+
+    def terminate(self) -> None:
+        self.terminated = True
+
+    def kill(self) -> None:
+        self.killed = True
+
+
+def test_signal_helpers_fallback_and_ignore_exited_processes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Signal helpers use direct-process fallbacks when group signals are unavailable."""
+    monkeypatch.setattr(subprocess_utils.os, "name", "nt")
+    running = SignalProcess()
+    terminate_process(cast(Process, running))
+    kill_process(cast(Process, running))
+
+    assert running.terminated
+    assert running.killed
+
+    exited = SignalProcess(returncode=0)
+    terminate_process(cast(Process, exited))
+    kill_process(cast(Process, exited))
+    assert not exited.terminated
+    assert not exited.killed
+
+
+@pytest.mark.anyio
+async def test_kill_process_tree_skips_exited_or_pidless_processes() -> None:
+    """Tree cleanup does not invoke a kill for already-terminal processes."""
+    exited = SignalProcess(returncode=0)
+    pidless = SignalProcess(pid=None)
+
+    await kill_process_tree(cast(Process, exited))
+    await kill_process_tree(cast(Process, pidless))
+
+    assert not exited.killed
+    assert not pidless.killed
+
+
+def test_signal_helpers_use_posix_group_and_fallback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """POSIX helpers target the process group and fall back after group errors."""
+    monkeypatch.setattr(subprocess_utils.os, "name", "posix")
+    monkeypatch.setattr(
+        subprocess_utils.signal,
+        "SIGKILL",
+        subprocess_utils.signal.SIGTERM,
+        raising=False,
+    )
+    calls: list[tuple[int, object]] = []
+
+    def _group_signal(pid: int, sig: object) -> None:
+        calls.append((pid, sig))
+
+    monkeypatch.setattr(subprocess_utils, "_kill_process_group", _group_signal)
+    running = SignalProcess(pid=456)
+    terminate_process(cast(Process, running))
+    kill_process(cast(Process, running))
+
+    assert [pid for pid, _ in calls] == [456, 456]
+    assert not running.terminated
+    assert not running.killed
+
+    def _failed_group_signal(pid: int, sig: object) -> None:
+        raise OSError("group unavailable")
+
+    monkeypatch.setattr(subprocess_utils, "_kill_process_group", _failed_group_signal)
+    fallback = SignalProcess(pid=789)
+    terminate_process(cast(Process, fallback))
+    assert fallback.terminated
+
+
+def test_kill_process_group_handles_missing_platform_support(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The POSIX-only group helper is a no-op when killpg is absent."""
+    monkeypatch.delattr(subprocess_utils.os, "killpg", raising=False)
+    subprocess_utils._kill_process_group(42, subprocess_utils.signal.SIGTERM)
 
 
 # ---------------------------------------------------------------------------

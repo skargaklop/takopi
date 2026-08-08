@@ -402,3 +402,245 @@ async def test_failure_observer_edits_card_to_error() -> None:
     ]
     assert error_edits
     assert "something broke" in error_edits[0]["message"].text
+
+
+@pytest.mark.anyio
+async def test_edit_progress_label_without_progress_ref_is_noop() -> None:
+    """_edit_progress_label is a no-op when job has no progress_ref."""
+    from takopi.scheduler import ThreadJob
+    from takopi.telegram.loop import _edit_progress_label
+
+    transport = FakeTransport()
+    cfg = make_cfg(transport)
+    job = ThreadJob(
+        chat_id=123,
+        user_msg_id=10,
+        text="queued",
+        resume_token=ResumeToken(engine=CODEX_ENGINE, value="sid"),
+        progress_ref=None,
+    )
+    await _edit_progress_label(cfg, job, label="starting")
+    assert transport.edit_calls == []
+
+
+@pytest.mark.anyio
+async def test_failure_observer_without_progress_ref_is_noop() -> None:
+    """on_job_failed is a no-op when job has no progress_ref."""
+    from takopi.scheduler import ThreadJob
+    from takopi.telegram.loop import _make_scheduler_observers
+
+    transport = FakeTransport()
+    cfg = make_cfg(transport)
+    _on_claimed, on_failed = _make_scheduler_observers(cfg, None)  # type: ignore[arg-type]
+    job = ThreadJob(
+        chat_id=123,
+        user_msg_id=10,
+        text="queued",
+        resume_token=ResumeToken(engine=CODEX_ENGINE, value="sid"),
+        progress_ref=None,
+    )
+    await on_failed(job, RuntimeError("test"))
+    assert transport.edit_calls == []
+
+
+@pytest.mark.anyio
+async def test_handle_enqueue_failure_edits_card() -> None:
+    from takopi.logging import get_logger
+    from takopi.telegram.loop import _handle_enqueue_failure
+
+    transport = FakeTransport()
+    progress_ref = MessageRef(channel_id=123, message_id=55)
+
+    await _handle_enqueue_failure(
+        get_logger(),
+        transport=transport,
+        engine=CODEX_ENGINE,
+        chat_id=123,
+        user_msg_id=10,
+        prompt_text="do important work",
+        progress_ref=progress_ref,
+        exc=RuntimeError("queue is full"),
+    )
+
+    assert transport.edit_calls
+    text = transport.edit_calls[0]["message"].text.lower()
+    assert "error" in text
+    assert "could not queue" in text
+    assert "queue is full" in text
+    assert "do important work" in text
+
+
+@pytest.mark.anyio
+async def test_handle_enqueue_failure_without_progress_ref_is_noop() -> None:
+    """_handle_enqueue_failure with no progress_ref logs but does not edit."""
+    from takopi.logging import get_logger
+    from takopi.telegram.loop import _handle_enqueue_failure
+
+    transport = FakeTransport()
+    await _handle_enqueue_failure(
+        get_logger(),
+        transport=transport,
+        engine=CODEX_ENGINE,
+        chat_id=123,
+        user_msg_id=10,
+        prompt_text="do important work",
+        progress_ref=None,
+        exc=RuntimeError(""),
+    )
+    assert transport.edit_calls == []
+
+
+# ---------------------------------------------------------------------------
+# handle_cancel status branches
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio
+async def test_handle_cancel_already_claimed_says_started() -> None:
+    """handle_cancel on an already-claimed job answers 'already started'."""
+    from takopi.model import ResumeToken
+    from takopi.scheduler import ThreadJob
+    from takopi.transport import MessageRef
+
+    transport = FakeTransport()
+    cfg = make_cfg(transport)
+
+    scheduler = _make_scheduler()
+    # Manually move a job to claimed state
+    job = ThreadJob(
+        chat_id=123,
+        user_msg_id=10,
+        text="claimed-prompt",
+        resume_token=ResumeToken(engine=CODEX_ENGINE, value="sid"),
+        progress_ref=MessageRef(channel_id=123, message_id=55),
+    )
+    progress_key = (123, 55)
+    async with scheduler._lock:
+        scheduler._claimed_by_progress[progress_key] = job
+
+    msg = _typed_cancel_msg(55)
+    await handle_cancel(cfg, msg, {}, scheduler)
+
+    sent = [c["message"].text for c in transport.send_calls]
+    assert sent
+    assert "already started" in sent[-1].lower()
+
+
+@pytest.mark.anyio
+async def test_handle_cancel_not_found_says_nothing_running() -> None:
+    """handle_cancel on an unknown job answers 'nothing is currently running'."""
+    transport = FakeTransport()
+    cfg = make_cfg(transport)
+
+    scheduler = _make_scheduler()
+    msg = _typed_cancel_msg(999)
+    await handle_cancel(cfg, msg, {}, scheduler)
+
+    sent = [c["message"].text for c in transport.send_calls]
+    assert sent
+    assert "nothing is currently running" in sent[-1].lower()
+
+
+# ---------------------------------------------------------------------------
+# handle_callback_steer defensive branches
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio
+async def test_steer_without_scheduler_answers_no_queue() -> None:
+    """handle_callback_steer with no scheduler answers 'no queue is available'."""
+    from takopi.telegram.commands.cancel import handle_callback_steer
+
+    transport = FakeTransport()
+    cfg = make_cfg(transport)
+    bot = cast(FakeBot, cfg.bot)
+    query = _callback_query(55, data="takopi:steer")
+    await handle_callback_steer(cfg, query, {})  # type: ignore[arg-type]
+
+    assert bot.callback_calls
+    assert "no queue" in bot.callback_calls[-1]["text"].lower()
+
+
+@pytest.mark.anyio
+async def test_steer_unknown_job_answers_not_queued() -> None:
+    """handle_callback_steer for an unknown job answers 'not queued'."""
+    from takopi.telegram.commands.cancel import handle_callback_steer
+
+    transport = FakeTransport()
+    cfg = make_cfg(transport)
+    bot = cast(FakeBot, cfg.bot)
+    scheduler = _make_scheduler()
+    query = _callback_query(999, data="takopi:steer")
+    await handle_callback_steer(cfg, query, {}, scheduler)  # type: ignore[arg-type]
+
+    assert bot.callback_calls
+    assert "not queued" in bot.callback_calls[-1]["text"].lower()
+
+
+@pytest.mark.anyio
+async def test_steer_no_matching_control_answers_not_steerable() -> None:
+    """handle_callback_steer when no matching active turn answers 'not steerable'."""
+    from takopi.telegram.commands.cancel import handle_callback_steer
+    from takopi.transport import MessageRef as MsgRef
+
+    transport = FakeTransport()
+    cfg = make_cfg(transport)
+    bot = cast(FakeBot, cfg.bot)
+    scheduler = _make_scheduler()
+    # Queue a job so get_queued finds it
+    job_resume = ResumeToken(engine=CODEX_ENGINE, value="sid")
+    await scheduler.enqueue_resume(
+        chat_id=123,
+        user_msg_id=10,
+        text="queued",
+        resume_token=job_resume,
+        progress_ref=MsgRef(channel_id=123, message_id=55),
+    )
+    query = _callback_query(55, data="takopi:steer")
+    # No matching running task with same resume token
+    await handle_callback_steer(cfg, query, {}, scheduler)  # type: ignore[arg-type]
+    assert bot.callback_calls
+    assert "not steerable" in bot.callback_calls[-1]["text"].lower()
+
+
+@pytest.mark.anyio
+async def test_steer_already_claimed_answers_left_queue() -> None:
+    """handle_callback_steer when job was claimed between get and claim."""
+
+    from takopi.model import ResumeToken as RT
+    from takopi.runner_bridge import RunningTask
+    from takopi.scheduler import ThreadJob
+    from takopi.telegram.commands.cancel import handle_callback_steer
+    from takopi.transport import MessageRef as MsgRef
+
+    transport = FakeTransport()
+    cfg = make_cfg(transport)
+    bot = cast(FakeBot, cfg.bot)
+
+    # Use a mock scheduler where get_queued returns a job but claim_queued returns None
+    job_resume = RT(engine=CODEX_ENGINE, value="sid")
+    job = ThreadJob(
+        chat_id=123,
+        user_msg_id=10,
+        text="claimed",
+        resume_token=job_resume,
+        progress_ref=MsgRef(channel_id=123, message_id=55),
+    )
+
+    class _RaceScheduler:
+        async def get_queued(self, chat_id, msg_id):
+            return job
+
+        async def claim_queued(self, chat_id, msg_id):
+            return None
+
+    task = RunningTask()
+    task.resume = job_resume
+    task.control = object()  # type: ignore[assignment]
+    running_tasks: dict = {MsgRef(channel_id=123, message_id=55): task}
+
+    query = _callback_query(55, data="takopi:steer")
+    await handle_callback_steer(cfg, query, running_tasks, _RaceScheduler())  # type: ignore[arg-type]
+
+    assert bot.callback_calls
+    assert "already left" in bot.callback_calls[-1]["text"].lower()

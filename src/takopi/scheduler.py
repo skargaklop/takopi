@@ -71,9 +71,7 @@ class CancelQueuedResult:
                 raise ValueError("CANCELLED result must carry the removed job")
         else:
             if self.job is not None:
-                raise ValueError(
-                    f"{self.status.name} result must not carry a job"
-                )
+                raise ValueError(f"{self.status.name} result must not carry a job")
 
 
 class TaskGroup(Protocol):
@@ -210,13 +208,9 @@ class ThreadScheduler:
             job = self._queued_by_progress.get(progress_key)
             if job is not None:
                 self._remove_pending_locked(job, progress_key)
-                return CancelQueuedResult(
-                    status=CancelQueuedStatus.CANCELLED, job=job
-                )
+                return CancelQueuedResult(status=CancelQueuedStatus.CANCELLED, job=job)
             if progress_key in self._claimed_by_progress:
-                return CancelQueuedResult(
-                    status=CancelQueuedStatus.ALREADY_CLAIMED
-                )
+                return CancelQueuedResult(status=CancelQueuedStatus.ALREADY_CLAIMED)
             return CancelQueuedResult(status=CancelQueuedStatus.NOT_FOUND)
 
     async def claim_queued(
@@ -297,7 +291,10 @@ class ThreadScheduler:
                 queue.remove(job)
             if not queue:
                 self._pending_by_thread.pop(key, None)
-        if progress_key is not None and self._queued_by_progress.get(progress_key) is job:
+        if (
+            progress_key is not None
+            and self._queued_by_progress.get(progress_key) is job
+        ):
             self._queued_by_progress.pop(progress_key, None)
         self._active_threads.discard(key)
 

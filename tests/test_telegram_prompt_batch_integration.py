@@ -758,6 +758,7 @@ async def test_prompt_batch_disabled_no_join() -> None:
 
     assert [call[0] for call in runner.calls] == ["one", "two"]
 
+
 # ---------------------------------------------------------------------------
 # Task 21: Cross-engine queue cancellation and isolation
 # ---------------------------------------------------------------------------

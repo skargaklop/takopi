@@ -22,6 +22,8 @@ from takopi.scheduler import (
 )
 from takopi.transport import MessageRef
 
+from .telegram_fakes import FakeTransport, make_cfg
+
 CODEX = "codex"
 
 
@@ -459,7 +461,6 @@ async def test_enqueue_after_rollback_starts_normally() -> None:
     async def _run_job(job: ThreadJob) -> None:
         ran.append(job.text)
 
-
     # Simulate a prior rollback by failing first enqueue via a broken tg.
     failing_tg = _FailingTaskGroup()
     scheduler_failing = ThreadScheduler(task_group=failing_tg, run_job=_run_job)
@@ -543,3 +544,228 @@ async def test_on_job_claimed_invoked_before_run_job() -> None:
                 await anyio.wait_all_tasks_blocked()
 
     assert order == ["claim:hi", "run:hi"]
+
+
+# ---------------------------------------------------------------------------
+# Validation and default observer coverage
+# ---------------------------------------------------------------------------
+
+
+def test_cancel_queued_result_cancelled_requires_job() -> None:
+    """CANCELLED without a job is a programming error."""
+    with pytest.raises(ValueError, match="must carry the removed job"):
+        CancelQueuedResult(status=CancelQueuedStatus.CANCELLED, job=None)
+
+
+def test_cancel_queued_result_already_claimed_rejects_job() -> None:
+    """ALREADY_CLAIMED with a job is a programming error."""
+    job = _job(msg_id=10, progress_id=50)
+    with pytest.raises(ValueError, match="must not carry a job"):
+        CancelQueuedResult(status=CancelQueuedStatus.ALREADY_CLAIMED, job=job)
+
+
+def test_cancel_queued_result_not_found_rejects_job() -> None:
+    """NOT_FOUND with a job is a programming error."""
+    job = _job(msg_id=10, progress_id=50)
+    with pytest.raises(ValueError, match="must not carry a job"):
+        CancelQueuedResult(status=CancelQueuedStatus.NOT_FOUND, job=job)
+
+
+@pytest.mark.anyio
+async def test_default_observers_are_no_ops() -> None:
+    """Scheduler with no observers still runs jobs normally."""
+    ran: list[str] = []
+
+    async def _run_job(job: ThreadJob) -> None:
+        ran.append(job.text)
+
+    async with anyio.create_task_group() as tg:
+        scheduler = ThreadScheduler(task_group=tg, run_job=_run_job)
+        await scheduler.enqueue(_job(msg_id=10, progress_id=50, text="ok"))
+
+        with anyio.fail_after(5):
+            while not ran:
+                await anyio.wait_all_tasks_blocked()
+
+    assert ran == ["ok"]
+
+
+# ---------------------------------------------------------------------------
+# claim_queued / requeue_front / observer exception coverage
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio
+async def test_claim_queued_removes_from_pending_and_returns_job() -> None:
+    """claim_queued removes the job from pending state and returns it."""
+    async with anyio.create_task_group() as tg:
+        scheduler = ThreadScheduler(
+            task_group=tg,
+            run_job=lambda job: anyio.sleep(0),  # never actually reached
+        )
+        # Manually insert into pending without starting worker
+        async with scheduler._lock:
+            job = _job(msg_id=10, progress_id=50, text="steer-me")
+            key = scheduler.thread_key(job.resume_token)
+            scheduler._pending_by_thread[key] = __import__("collections").deque([job])
+            assert job.progress_ref is not None
+            progress_key = (job.chat_id, job.progress_ref.message_id)
+            scheduler._queued_by_progress[progress_key] = job
+
+        claimed = await scheduler.claim_queued(123, 50)
+        assert claimed is not None
+        assert claimed.text == "steer-me"
+
+        # Job is no longer in pending
+        assert await scheduler.get_queued(123, 50) is None
+
+
+@pytest.mark.anyio
+async def test_claim_queued_returns_none_for_unknown_job() -> None:
+    """claim_queued returns None for a job that was never queued."""
+    async with anyio.create_task_group() as tg:
+        scheduler = ThreadScheduler(task_group=tg, run_job=lambda job: anyio.sleep(0))
+        claimed = await scheduler.claim_queued(123, 999)
+        assert claimed is None
+
+
+@pytest.mark.anyio
+async def test_requeue_front_creates_queue_if_missing() -> None:
+    """requeue_front creates a new queue and starts the worker if needed."""
+    ran: list[str] = []
+
+    async def _run_job(job: ThreadJob) -> None:
+        ran.append(job.text)
+
+    async with anyio.create_task_group() as tg:
+        scheduler = ThreadScheduler(task_group=tg, run_job=_run_job)
+        job = _job(msg_id=10, progress_id=50, text="requeued")
+        await scheduler.requeue_front(job)
+
+        with anyio.fail_after(5):
+            while not ran:
+                await anyio.wait_all_tasks_blocked()
+
+    assert ran == ["requeued"]
+
+
+@pytest.mark.anyio
+async def test_claim_observer_exception_does_not_block_run_job() -> None:
+    """A raising on_job_claimed is logged but run_job still runs."""
+    ran: list[str] = []
+
+    async def _run_job(job: ThreadJob) -> None:
+        ran.append(job.text)
+
+    async def _failing_claimed(_job: ThreadJob) -> None:
+        raise RuntimeError("observer broke")
+
+    async with anyio.create_task_group() as tg:
+        scheduler = ThreadScheduler(
+            task_group=tg, run_job=_run_job, on_job_claimed=_failing_claimed
+        )
+        await scheduler.enqueue(_job(msg_id=10, progress_id=50, text="survive"))
+
+        with anyio.fail_after(5):
+            while not ran:
+                await anyio.wait_all_tasks_blocked()
+
+    assert ran == ["survive"]
+
+
+@pytest.mark.anyio
+async def test_queue_drains_after_busy_release() -> None:
+    """After busy token releases, queued jobs drain and thread becomes inactive."""
+    ran: list[str] = []
+
+    async def _run_job(job: ThreadJob) -> None:
+        ran.append(job.text)
+
+    async with anyio.create_task_group() as tg:
+        scheduler = ThreadScheduler(task_group=tg, run_job=_run_job)
+        # Enqueue two jobs; first is busy, second queues behind.
+        await scheduler.enqueue(_job(msg_id=10, progress_id=50, text="first"))
+
+        with anyio.fail_after(5):
+            while not ran:
+                await anyio.wait_all_tasks_blocked()
+
+        # Now queue another — it will wait for busy
+        await scheduler.enqueue(_job(msg_id=11, progress_id=51, text="second"))
+
+        with anyio.fail_after(5):
+            while len(ran) < 2:
+                await anyio.wait_all_tasks_blocked()
+
+    assert ran == ["first", "second"]
+
+
+@pytest.mark.anyio
+async def test_failure_observer_exception_is_logged_not_raised() -> None:
+    """A raising on_job_failed is logged but does not crash the scheduler."""
+    ran: list[str] = []
+
+    async def _run_job(job: ThreadJob) -> None:
+        ran.append(job.text)
+        if job.text == "boom":
+            raise RuntimeError("job failed")
+
+    async def _failing_on_failed(_job: ThreadJob, _exc: BaseException) -> None:
+        raise RuntimeError("observer also broke")
+
+    async with anyio.create_task_group() as tg:
+        scheduler = ThreadScheduler(
+            task_group=tg,
+            run_job=_run_job,
+            on_job_failed=_failing_on_failed,
+        )
+        await scheduler.enqueue(_job(msg_id=10, progress_id=50, text="boom"))
+        await scheduler.enqueue(_job(msg_id=11, progress_id=51, text="ok"))
+
+        with anyio.fail_after(5):
+            while len(ran) < 2:
+                await anyio.wait_all_tasks_blocked()
+
+    assert ran == ["boom", "ok"]
+
+
+@pytest.mark.anyio
+async def test_on_job_failed_without_progress_ref_skips_edit() -> None:
+    """on_job_failed on a job with no progress_ref does not crash."""
+    import anyio
+
+    from takopi.scheduler import ThreadJob, ThreadScheduler
+    from takopi.telegram.loop import _make_scheduler_observers
+
+    transport = FakeTransport()
+    cfg = make_cfg(transport)
+
+    ran: list[str] = []
+
+    async def _run_job(job: ThreadJob) -> None:
+        ran.append(job.text)
+        raise RuntimeError("oops")
+
+    _on_claimed, on_failed = _make_scheduler_observers(cfg, None)  # type: ignore[arg-type]
+
+    job = ThreadJob(
+        chat_id=123,
+        user_msg_id=10,
+        text="no-progress",
+        resume_token=ResumeToken(engine=CODEX, value="sid"),
+        progress_ref=None,
+    )
+
+    async with anyio.create_task_group() as tg:
+        scheduler = ThreadScheduler(
+            task_group=tg,
+            run_job=_run_job,
+            on_job_failed=on_failed,
+        )
+        await scheduler.enqueue(job)
+
+        with anyio.fail_after(5):
+            while not ran:
+                await anyio.wait_all_tasks_blocked()
+
+    assert ran == ["no-progress"]

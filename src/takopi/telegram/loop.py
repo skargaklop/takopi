@@ -28,7 +28,7 @@ from .files import (
 from ..scheduler import EnqueueDisposition, ThreadJob, ThreadScheduler
 from ..progress import ProgressTracker
 from ..settings import TelegramTransportSettings
-from ..transport import MessageRef, RenderedMessage, SendOptions
+from ..transport import MessageRef, RenderedMessage, SendOptions, Transport
 from ..transport_runtime import ResolvedMessage
 from ..context import RunContext
 from ..ids import RESERVED_CHAT_COMMANDS
@@ -1392,6 +1392,36 @@ def _make_scheduler_observers(
     return _on_job_claimed, _on_job_failed
 
 
+async def _handle_enqueue_failure(
+    logger,
+    *,
+    transport: Transport,
+    engine: str,
+    chat_id: int,
+    user_msg_id: int,
+    prompt_text: str,
+    progress_ref: MessageRef | None,
+    exc: BaseException,
+) -> None:
+    """Edit the sent progress card to a terminal error on enqueue failure."""
+    logger.error(
+        "enqueue.failed",
+        engine=engine,
+        chat_id=chat_id,
+        user_msg_id=user_msg_id,
+        error=str(exc),
+        error_type=exc.__class__.__name__,
+    )
+    preview = prompt_text[:80]
+    detail = str(exc)[:200] if str(exc) else exc.__class__.__name__
+    error_text = f"**error** · `{engine}`\n\ncould not queue: {detail}\n\n> {preview}"
+    if progress_ref is not None:
+        await transport.edit(
+            ref=progress_ref,
+            message=RenderedMessage(text=error_text),
+        )
+
+
 async def _send_queued_progress(
     cfg: TelegramBridgeConfig,
     *,
@@ -2217,25 +2247,16 @@ async def run_main_loop(
                         goal,
                     )
                 except Exception as exc:  # noqa: BLE001
-                    logger.error(
-                        "enqueue.failed",
+                    _handle_enqueue_failure(
+                        logger,
+                        transport=cfg.exec_cfg.transport,
                         engine=resume_token.engine,
                         chat_id=chat_id,
                         user_msg_id=user_msg_id,
-                        error=str(exc),
-                        error_type=exc.__class__.__name__,
+                        prompt_text=prompt_text,
+                        progress_ref=progress_ref,
+                        exc=exc,
                     )
-                    preview = prompt_text[:80]
-                    detail = str(exc)[:200] if str(exc) else exc.__class__.__name__
-                    error_text = (
-                        f"**error** · `{resume_token.engine}`\n\n"
-                        f"could not queue: {detail}\n\n> {preview}"
-                    )
-                    if progress_ref is not None:
-                        await cfg.exec_cfg.transport.edit(
-                            ref=progress_ref,
-                            message=RenderedMessage(text=error_text),
-                        )
 
             async def run_prompt_from_upload(
                 msg: TelegramIncomingMessage,
