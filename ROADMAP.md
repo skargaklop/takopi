@@ -963,6 +963,44 @@ The `/model` command currently manages model overrides in chat/topic scopes and 
 
 ---
 
+## Task 24: Untether Evaluation and Merge Direction (untether ↔ takopi)
+
+### Problem
+
+`https://github.com/littlebearapps/untether` (verified 2026-08-07) is an actively developed, MIT-licensed Python project in the SAME domain as takopi: a Telegram bridge for AI coding agents. Its README describes "Code from anywhere — Telegram bridge for AI coding agents (Claude Code, Codex, OpenCode, Pi, Gemini CLI, Amp). Stream progress, approve actions, and send tasks by voice from your phone." It ships its own `src`/`tests`, `ROADMAP.md`, `AGENTS.md`/`CLAUDE.md`, uv/Justfile/zensical tooling, and reports 157 open issues — indicating real-world usage and an overlapping feature surface. The user wants to explore untether's features and merge the two projects in ONE direction — either untether's features/code into takopi, or takopi's into untether. The direction is undecided and must be evidence-based.
+
+### Requirements
+
+1. **Clone and study untether** read-only at a scratch location (e.g. `D:\Projects\untether-review`): map its module layout (`src/`), supported harnesses (Claude Code, Codex, OpenCode, Pi, Gemini CLI, Amp — plus any others), transport/telegram architecture, session/resume model, queueing, approvals/action-gating, voice input, and its `ROADMAP.md`/`llms.txt` feature inventory.
+2. **Feature matrix vs takopi:** produce a head-to-head comparison table — features untether has that takopi lacks, features takopi has that untether lacks, and shared/duplicated surface (runners, schema decoding, session handling, telegram loop, queue, compact/handoff, plan/goal modes, retries, tool-action rendering). Save it under `docs/reference/untether-comparison.md`.
+3. **Engineering assessment:** language/tooling fit (both Python + uv), code quality signals (tests, ruff/ty health, CI), licensing (MIT — compatible), and how each project's invariants would survive a merge. Note the Roadmap Task 21/22/23 interplay: if untether's queue or session-id handling is merged, it must satisfy takopi's queue-cancellation and full-session-id contracts.
+4. **Merge-direction recommendation:** based on the matrix — (A) untether → takopi (port untether features into takopi as new runner(s)/modules), or (B) takopi → untether (migrate takopi's capabilities into untether as the base). Recommend ONE direction with explicit rationale and a concrete port/migration inventory. Do NOT start the merge without explicit user approval of the direction (approval gate).
+5. **Merge execution (after approval):** follow the standard workflow — plan document in `docs/plans/`, subagent execution with TDD, full verification (pytest, ruff, ty zero-diagnostics gate, cross-platform Windows/macOS/Linux), and a Telegram e2e check of the merged surface.
+6. **No assumptions:** feature claims about untether must come from its actual source/README, not speculation; save the repo snapshot hash and date in the comparison doc.
+
+### Investigation Steps
+
+1. Dispatch a read-only investigation subagent to clone `https://github.com/littlebearapps/untether` into a scratch directory and produce the feature inventory + module map + `ROADMAP.md` summary. Explicitly constrain: "Do NOT modify any files outside the scratch directory; do NOT touch takopi sources."
+2. Dispatch a read-only subagent (or reuse the first) to build the feature matrix against takopi's current surface (`docs/reference/` + `src/takopi/`), identifying overlaps and gaps per requirement 2.
+3. Review the matrix with the user; propose the merge direction (A or B) with the port/migration inventory and the approval gate.
+4. Write an implementation plan (`.md` in `docs/plans/`) for the approved direction.
+5. Execute via code-editing subagents (TDD), then run the full verification suite.
+
+### Plan
+
+- TBD: requires the clone + feature matrix before a merge direction can be proposed.
+
+### Scope
+
+- Scratch clone: `D:\Projects\untether-review` (investigation only)
+- `docs/reference/untether-comparison.md` — feature matrix + engineering assessment
+- Direction A: new takopi modules/features ported from untether (runners for Gemini CLI / Amp if adopted, approvals, voice, etc.)
+- Direction B: takopi capabilities migrated into the untether codebase (merge/port under the approved base)
+- `docs/plans/` — merge plan, `changelog.md`, `EXPERIENCE.md` subagent-feedback notes
+- Tests: new/modified per merged surface; full suite + ruff + `ty check` (zero diagnostics) + cross-platform
+
+---
+
 ## Workflow Convention
 
 All non-trivial tasks in this roadmap follow this sequence:
