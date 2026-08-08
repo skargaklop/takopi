@@ -849,7 +849,7 @@ A live Telegram status showed `thread: omp:019fd7f2 busy: yes queued: 0`, but th
 
 ---
 
-## Task 22: OMP/Pi Stream Schema Compatibility and Capacity-Failure Handling
+## Task 22: OMP/Pi Stream Schema Compatibility and Capacity-Failure Handling (DONE)
 
 ### Problem
 
@@ -886,7 +886,16 @@ Separately, the Telegram progress/session label for `omp` shows only the first p
 
 ### Plan
 
-- TBD: exact OMP stream capture is required before selecting schema widening versus an OMP-local adapter.
+Implemented 2026-08-07 across 7 commits (`46b7c50`→`d8c2229`). Evidence-gated: real OMP source code (`omp/17.2.10` `dist/cli.js`) confirmed float `delayMs` via the `KRi(baseDelayMs, attempt)` jitter formula, `notice` via `emitNotice()`, and OmniRoute 503 terminal failure shape; the historical Takopi log and stored session are corroborating evidence only. Deliverables:
+
+- **Forward-compatible decoder** (`7e0e7b2`): `PiUnknownEvent` peek-dispatch for unknown string tags (one DEBUG `pi.stream.unknown_type`, no WARNING/ERROR); `AutoRetryStart.delayMs: int | float | None` preserving producer precision; known tags stay strict; malformed lines remain line-local.
+- **Full OMP session IDs** (`02cbd99`): `shorten_session_id=False` policy on every `OmpRunner` state; Pi's abbreviated behavior unchanged; `format_resume`/progress footer emit the complete UUID.
+- **OmniRoute 503 classification** (`6ccc5f5`): bare `503 … retry-after-ms=…` prefix now matched by the shared `transient_failures` classifier (proven shared defect — no `http`/`status` keyword); `GROK_503_BLOB`→`OMNIROUTE_503_BLOB`; `rc=0` capacity path and `stopReason:"error"` completions both classify as transient.
+- **File-backed task workflow** (`8127158`): non-image `auto_put_mode="prompt"` uploads emit `Execute the task specified in this file: \`<path>\`.` instead of `[uploaded file: …]`.
+- **Live OMP smoke** (`02bffcd`): `live_omp` marker + `tests/test_omp_stream_live.py` spawns real `omp`, asserts clean Started/Completed + full UUID; passes on Windows.
+- **Docs + changelog** (`d8c2229`): `docs/reference/runners/omp/stream-compatibility.md` evidence record + compatibility boundary table; `runner.md` cross-link; `changelog.md` entries.
+
+Verification (Windows, Python 3.14): `ruff format --check .` clean, `ruff check .` clean, `ty check src tests` zero diagnostics, `pytest -q` 1064 passed / 3 skipped (live markers), `test_subprocess_close.py` 11/11.
 
 ### Scope
 
