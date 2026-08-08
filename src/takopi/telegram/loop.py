@@ -25,10 +25,10 @@ from .files import (
     format_image_prompt_annotation,
     is_image_document,
 )
-from ..scheduler import ThreadJob, ThreadScheduler
+from ..scheduler import EnqueueDisposition, ThreadJob, ThreadScheduler
 from ..progress import ProgressTracker
 from ..settings import TelegramTransportSettings
-from ..transport import MessageRef, SendOptions
+from ..transport import MessageRef, RenderedMessage, SendOptions
 from ..transport_runtime import ResolvedMessage
 from ..context import RunContext
 from ..ids import RESERVED_CHAT_COMMANDS
@@ -1087,7 +1087,7 @@ class ResumeResolver:
                 tuple[int, int | None] | None,
                 MessageRef | None,
             ],
-            Awaitable[None],
+            Awaitable[EnqueueDisposition],
         ],
         topic_store: TopicStateStore | None,
         chat_session_store: ChatSessionStore | None,
@@ -1327,6 +1327,69 @@ def _thread_turn_steerable(
         if control is not None and resume == resume_token:
             return True
     return False
+
+
+async def _edit_progress_label(
+    cfg: TelegramBridgeConfig,
+    job: ThreadJob,
+    label: str,
+) -> None:
+    """Edit a queued job's progress card to a new label (starting/error).
+
+    Used by scheduler observers to transition the card before the runner
+    owns it (claim) or when the worker fails unexpectedly (error).
+    """
+    if job.progress_ref is None:
+        return
+    tracker = ProgressTracker(engine=job.resume_token.engine)
+    tracker.set_resume(job.resume_token)
+    context_line = cfg.runtime.compose_context_line(
+        job.context, plan=job.plan, goal=job.goal
+    )
+    resume_formatter = None
+    if should_show_resume_line(
+        show_resume_line=cfg.show_resume_line,
+        stateful_mode=cfg.session_mode == "chat",
+        context=job.context,
+    ):
+        resume_formatter = cfg.runtime.resolve_runner(
+            resume_token=job.resume_token,
+            engine_override=None,
+        ).runner.format_resume
+    state = tracker.snapshot(
+        resume_formatter=resume_formatter,
+        context_line=context_line,
+    )
+    message = cfg.exec_cfg.presenter.render_progress(
+        state,
+        elapsed_s=0.0,
+        label=label,
+    )
+    await cfg.exec_cfg.transport.edit(ref=job.progress_ref, message=message)
+
+
+def _make_scheduler_observers(
+    cfg: TelegramBridgeConfig,
+    logger,
+):
+    """Build on_job_claimed and on_job_failed closures for ThreadScheduler."""
+
+    async def _on_job_claimed(job: ThreadJob) -> None:
+        await _edit_progress_label(cfg, job, label="starting")
+
+    async def _on_job_failed(job: ThreadJob, exc: BaseException) -> None:
+        detail = str(exc)[:200] if str(exc) else exc.__class__.__name__
+        preview = job.text[:80]
+        text = (
+            f"**error** · `{job.resume_token.engine}`\n\n"
+            f"queued run failed: {detail}\n\n"
+            f"> {preview}"
+        )
+        message = RenderedMessage(text=text)
+        if job.progress_ref is not None:
+            await cfg.exec_cfg.transport.edit(ref=job.progress_ref, message=message)
+
+    return _on_job_claimed, _on_job_failed
 
 
 async def _send_queued_progress(
@@ -1938,7 +2001,13 @@ async def run_main_loop(
                     job.goal,
                 )
 
-            scheduler = ThreadScheduler(task_group=tg, run_job=run_thread_job)
+            _on_claimed, _on_failed = _make_scheduler_observers(cfg, logger)
+            scheduler = ThreadScheduler(
+                task_group=tg,
+                run_job=run_thread_job,
+                on_job_claimed=_on_claimed,
+                on_job_failed=_on_failed,
+            )
 
             def resolve_topic_key(
                 msg: TelegramIncomingMessage,
@@ -2134,18 +2203,39 @@ async def run_main_loop(
                     plan=plan,
                     goal=goal,
                 )
-                await scheduler.enqueue_resume(
-                    chat_id,
-                    user_msg_id,
-                    prompt_text,
-                    resume_token,
-                    context,
-                    msg.thread_id,
-                    chat_session_key,
-                    progress_ref,
-                    plan,
-                    goal,
-                )
+                try:
+                    await scheduler.enqueue_resume(
+                        chat_id,
+                        user_msg_id,
+                        prompt_text,
+                        resume_token,
+                        context,
+                        msg.thread_id,
+                        chat_session_key,
+                        progress_ref,
+                        plan,
+                        goal,
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    logger.error(
+                        "enqueue.failed",
+                        engine=resume_token.engine,
+                        chat_id=chat_id,
+                        user_msg_id=user_msg_id,
+                        error=str(exc),
+                        error_type=exc.__class__.__name__,
+                    )
+                    preview = prompt_text[:80]
+                    detail = str(exc)[:200] if str(exc) else exc.__class__.__name__
+                    error_text = (
+                        f"**error** · `{resume_token.engine}`\n\n"
+                        f"could not queue: {detail}\n\n> {preview}"
+                    )
+                    if progress_ref is not None:
+                        await cfg.exec_cfg.transport.edit(
+                            ref=progress_ref,
+                            message=RenderedMessage(text=error_text),
+                        )
 
             async def run_prompt_from_upload(
                 msg: TelegramIncomingMessage,

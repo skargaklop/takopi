@@ -35,7 +35,9 @@ def _make_scheduler() -> ThreadScheduler:
     return ThreadScheduler(task_group=_NoopTaskGroup(), run_job=_noop_run_job)
 
 
-def _callback_query(progress_id: int, data: str = "takopi:cancel") -> TelegramCallbackQuery:
+def _callback_query(
+    progress_id: int, data: str = "takopi:cancel"
+) -> TelegramCallbackQuery:
     return TelegramCallbackQuery(
         transport="telegram",
         chat_id=123,
@@ -108,11 +110,17 @@ async def test_callback_cancel_removes_only_selected_at_depth_two() -> None:
     ref_a = MessageRef(channel_id=123, message_id=50)
     ref_b = MessageRef(channel_id=123, message_id=51)
     await scheduler.enqueue_resume(
-        chat_id=123, user_msg_id=10, text="first", resume_token=resume,
+        chat_id=123,
+        user_msg_id=10,
+        text="first",
+        resume_token=resume,
         progress_ref=ref_a,
     )
     await scheduler.enqueue_resume(
-        chat_id=123, user_msg_id=11, text="second", resume_token=resume,
+        chat_id=123,
+        user_msg_id=11,
+        text="second",
+        resume_token=resume,
         progress_ref=ref_b,
     )
 
@@ -136,8 +144,11 @@ async def test_callback_cancel_stale_is_idempotent() -> None:
     progress_ref = MessageRef(channel_id=123, message_id=progress_id)
     resume = ResumeToken(engine=CODEX_ENGINE, value="sid")
     await scheduler.enqueue_resume(
-        chat_id=123, user_msg_id=10, text="queued prompt",
-        resume_token=resume, progress_ref=progress_ref,
+        chat_id=123,
+        user_msg_id=10,
+        text="queued prompt",
+        resume_token=resume,
+        progress_ref=progress_ref,
     )
 
     # First cancel: success
@@ -175,8 +186,11 @@ async def test_callback_cancel_already_claimed_answers_started() -> None:
     from takopi.scheduler import ThreadJob
 
     job = ThreadJob(
-        chat_id=123, user_msg_id=10, text="queued prompt",
-        resume_token=resume, progress_ref=progress_ref,
+        chat_id=123,
+        user_msg_id=10,
+        text="queued prompt",
+        resume_token=resume,
+        progress_ref=progress_ref,
     )
     scheduler._claimed_by_progress[(123, 55)] = job
     _ = deque  # suppress unused
@@ -237,8 +251,11 @@ async def test_typed_cancel_pending_edits_to_cancelled() -> None:
     progress_ref = MessageRef(channel_id=123, message_id=progress_id)
     resume = ResumeToken(engine=CODEX_ENGINE, value="sid")
     await scheduler.enqueue_resume(
-        chat_id=123, user_msg_id=10, text="queued prompt",
-        resume_token=resume, progress_ref=progress_ref,
+        chat_id=123,
+        user_msg_id=10,
+        text="queued prompt",
+        resume_token=resume,
+        progress_ref=progress_ref,
     )
 
     await handle_cancel(cfg, _typed_cancel_msg(progress_id), {}, scheduler)
@@ -261,8 +278,11 @@ async def test_typed_cancel_already_claimed_replies_started() -> None:
     from takopi.scheduler import ThreadJob
 
     job = ThreadJob(
-        chat_id=123, user_msg_id=10, text="queued prompt",
-        resume_token=resume, progress_ref=MessageRef(channel_id=123, message_id=55),
+        chat_id=123,
+        user_msg_id=10,
+        text="queued prompt",
+        resume_token=resume,
+        progress_ref=MessageRef(channel_id=123, message_id=55),
     )
     scheduler._claimed_by_progress[(123, 55)] = job
 
@@ -271,3 +291,114 @@ async def test_typed_cancel_already_claimed_replies_started() -> None:
     assert transport.send_calls
     reply_text = transport.send_calls[-1]["message"].text.lower()
     assert "already started" in reply_text
+
+
+# ---------------------------------------------------------------------------
+# Scheduler observer presentation tests: claim edits to starting, failure edits to error
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.anyio
+async def test_claim_observer_edits_card_to_starting() -> None:
+    """on_job_claimed edits the queued card to 'starting' before run_job."""
+    import anyio
+
+    from takopi.scheduler import ThreadJob
+    from takopi.telegram.loop import _make_scheduler_observers
+
+    transport = FakeTransport()
+    cfg = make_cfg(transport)
+
+    claimed = anyio.Event()
+    release = anyio.Event()
+
+    async def _run_job(job: ThreadJob) -> None:
+        claimed.set()
+        await release.wait()
+
+    on_claimed, _on_failed = _make_scheduler_observers(cfg, None)  # type: ignore[arg-type]
+
+    async with anyio.create_task_group() as tg:
+        from takopi.scheduler import ThreadScheduler
+
+        scheduler = ThreadScheduler(
+            task_group=tg,
+            run_job=_run_job,
+            on_job_claimed=on_claimed,
+        )
+        progress_ref = MessageRef(channel_id=123, message_id=55)
+        resume = ResumeToken(engine=CODEX_ENGINE, value="sid")
+        await scheduler.enqueue_resume(
+            chat_id=123,
+            user_msg_id=10,
+            text="queued prompt",
+            resume_token=resume,
+            progress_ref=progress_ref,
+        )
+
+        with anyio.fail_after(5):
+            await claimed.wait()
+
+        # The claim observer should have edited the card to "starting"
+        assert transport.edit_calls
+        edited = transport.edit_calls[0]["message"]
+        assert "starting" in edited.text.lower()
+
+        release.set()
+
+
+@pytest.mark.anyio
+async def test_failure_observer_edits_card_to_error() -> None:
+    """on_job_failed edits the card to a terminal error and FIFO continues."""
+    import anyio
+
+    from takopi.scheduler import ThreadJob
+    from takopi.telegram.loop import _make_scheduler_observers
+
+    transport = FakeTransport()
+    cfg = make_cfg(transport)
+
+    ran: list[str] = []
+
+    async def _run_job(job: ThreadJob) -> None:
+        ran.append(job.text)
+        if job.text == "boom":
+            raise RuntimeError("something broke")
+
+    _on_claimed, on_failed = _make_scheduler_observers(cfg, None)  # type: ignore[arg-type]
+
+    async with anyio.create_task_group() as tg:
+        from takopi.scheduler import ThreadScheduler
+
+        scheduler = ThreadScheduler(
+            task_group=tg,
+            run_job=_run_job,
+            on_job_failed=on_failed,
+        )
+        resume = ResumeToken(engine=CODEX_ENGINE, value="sid")
+        await scheduler.enqueue_resume(
+            chat_id=123,
+            user_msg_id=10,
+            text="boom",
+            resume_token=resume,
+            progress_ref=MessageRef(channel_id=123, message_id=50),
+        )
+        await scheduler.enqueue_resume(
+            chat_id=123,
+            user_msg_id=11,
+            text="ok",
+            resume_token=resume,
+            progress_ref=MessageRef(channel_id=123, message_id=51),
+        )
+
+        with anyio.fail_after(5):
+            while len(ran) < 2:
+                await anyio.wait_all_tasks_blocked()
+
+    assert ran == ["boom", "ok"]
+    # The failed job's card should have been edited to error
+    error_edits = [
+        e for e in transport.edit_calls if "error" in e["message"].text.lower()
+    ]
+    assert error_edits
+    assert "something broke" in error_edits[0]["message"].text
