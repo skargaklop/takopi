@@ -988,7 +988,7 @@ The `/model` command currently manages model overrides in chat/topic scopes and 
 
 ### Plan
 
-- TBD: requires the clone + feature matrix before a merge direction can be proposed.
+- [2026-08-08] Comparison complete. Snapshots: takopi `481f0c72f50ef5b7a7793f547059d691f7b8ffc3`, untether `4285dad5a12e4e4113c9cc5240972a67bbb5e218`. Recommend: **takopi → untether** (73.33 vs 66.67 weighted). Comparison: `docs/reference/untether-comparison.md`. Future plan: `docs/plans/2026-08-08-untether-takopi-to-untether-merge.md`. Status: **AWAITING DIRECTION APPROVAL**.
 
 ### Scope
 

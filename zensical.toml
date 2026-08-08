@@ -44,6 +44,7 @@ nav = [
     { "Changelog" = "reference/changelog.md" },
     { "Specification" = "reference/specification.md" },
     { "Plugin API" = "reference/plugin-api.md" },
+    { "Untether comparison" = "reference/untether-comparison.md" },
     { "Plugins" = "reference/plugins.md" },
     { "Context resolution" = "reference/context-resolution.md" },
     { "Telegram transport" = "reference/transports/telegram.md" },
