@@ -14,6 +14,8 @@
 
 Finish the migration specified by `D:/Projects/takopi/docs/plans/2026-08-09-takopi-untether-audit-cutover-plan.md`, correct its evidence ledger against the current Untether tree, carry the genuinely unfinished Takopi roadmap work requested by the user, and re-prove the already-completed live cutover. Source and behavior tests in `D:/Projects/untether` override stale completion language in `docs/audits/2026-08-09-takopi-feature-port-audit.md`; `D:/Projects/takopi/docs/reference/untether-comparison.md` remains mandatory historical evidence, not current truth. `D:/Projects/takopi/ROADMAP.md` is the sole roadmap carryover source.
 
+This plan also owns the reported `/health` failure as an additive migration gap; see `local://slash-health-migration-gap-plan.md`. The backend and entry point exist in source, but installed registry discovery, loop-level early dispatch, built-wheel completeness, Startup runtime survival, and authorized Telegram delivery were not proven. The fatal observed process crash came from a removed stale wheel expression already fixed in current source, so retain the source command architecture and close the deployment/test gap rather than adding a second dispatcher.
+
 Before editing, record the Untether and Takopi revisions and working-tree state. The last read-only audit saw Untether `f23881123522a5336201934d7ec48a82eb7ef0bf` and Takopi `e51e256850d9a3b1bde447690a1c9fc6db6474cf`; treat both as `unverified — confirm first` at execution time. Preserve all unrelated user changes. Never print Telegram credentials, allowed-user/chat IDs, resume tokens, state contents, lock fingerprints, or secret environment values.
 
 ## Reconciled disposition matrix
@@ -35,6 +37,7 @@ Before editing, record the Untether and Takopi revisions and working-tree state.
 7. **Hard verification gates — partial.** `.github/workflows/ci.yml` keeps `ty` informational with `allow_failure: true`; format/Ruff/ty run only on Ubuntu. Focused port tests mostly test helpers/defaults rather than the loop/runtime contracts. No fresh complete branch-coverage or native engine evidence is recorded.
 8. **Audit accuracy — stale.** The audit ledger identifies old HEAD `daca548c`, says all E-items are complete, calls roadmap Tasks 4/20 not applicable, incorrectly claims Pi goal-list seeding and Claude/OpenCode subagent injection were ported, and does not distinguish implemented data fields from missing consumers.
 9. **Live configuration/state — runtime-unverified.** The inspected `C:/Users/DELL E5570/.untether/untether.toml` still contains the obsolete top-level `[logging]` table. The startup launcher and global tool were already repaired. Earlier cutover evidence says the three stores were copied and two CWD-bound chat sessions were intentionally cleared; a later read-only audit saw Untether's chat-session store empty while Takopi's remained populated. Treat this as a conflict to resolve safely at execution time, not permission to overwrite post-cutover Untether state.
+10. **Health command runtime reliability — partial/runtime-unverified.** `/health` exists and is advertised, but tests call its backend directly and packaging checks do not load command entry points. A stale loaded wheel killed the Telegram poller through `TransportRuntime.resolve_message()`; current source and the editable venv are repaired. Add resolver, real-registry, loop-dispatch/no-runner, graceful-snapshot, and clean-wheel command-backend tests, then verify `/health` → engine directive → `/health` through exactly one restarted Startup-owned poller. The exact failed slash attempt’s path remains runtime-unverified until that smoke.
 
 ### Runtime-unverified
 
@@ -47,10 +50,15 @@ Before editing, record the Untether and Takopi revisions and working-tree state.
 
 ## Ordered implementation
 
-### 1. Freeze evidence and correct the audit method
+### 1. Freeze evidence and complete the exhaustive commit-derived feature ledger
 
-Read current revisions/status and rerun the ledger reconciliation before behavior edits. Update `D:/Projects/untether/docs/audits/2026-08-09-takopi-feature-port-audit.md` only after implementation/tests establish final dispositions. Retain citations to the authoritative plan and comparison, update both HEAD fields, use the requested vocabulary (`implemented`, `partial`, `missing`, `runtime-unverified`, `superseded`, `not-applicable`, `stale`), and split source behavior, deterministic verification, runtime evidence, and roadmap-only work. Replace the incorrect E5 and completion table claims; record that the earlier global `uv` tool failure was stale installed code repaired by a forced local-source reinstall, with no source change required.
-Before closing ledger rows E2/E3/A16, distinguish parser/data-field presence from behavior: sticky/meta dispatch, plan/goal card composition, and Claude/OpenCode subagent injection remain partial until their destination tests pass. Record `/skill` as intentionally one-shot, carried-but-not-injected data. Record that badges/context footers intentionally show only plan/goal, matching Takopi’s source; skill/subagent remain observable through command status/argument tests rather than a new card badge. Do not invent sticky skill or skill CLI-injection contracts.
+Treat `git log --all --reverse --format=%H` in `D:/Projects/takopi` as the audit population. The planning-time count is 453 reachable commits. Merge the twelve disjoint read-only subagent ledgers only after proving all 453 hashes occur exactly once with continuous ordinals and the expected first/last hashes. Every commit must have been inspected by diff and classified; commit subjects alone are not evidence. Deduplicate related commits into current observable feature/requirement keys while preserving every contributing hash and tracing removals/refinements to final Takopi state.
+
+Insert the complete feature inventory into `local://takopi-untether-complete-gap-audit-plan.md` before implementation. For every feature, require exact Takopi source/tests/docs anchors, exact Untether source/tests/docs anchors, one disposition (`implemented`, `partial`, `missing`, `runtime-unverified`, `superseded`, `not-applicable`, or `stale`), and a focused equivalence check covering behavior, errors/cancellation, security, and cross-platform behavior where applicable. Convert every actionable non-implemented disposition into an ordered task below and a roadmap entry when deferred/user-facing. Preserve superseded/not-applicable rationale. Reconcile the result against every migration plan, both roadmaps/changelogs, and `docs/audits/2026-08-09-takopi-feature-port-audit.md`; source-history evidence wins over stale prose.
+
+Read current revisions/status before behavior edits. Update `D:/Projects/untether/docs/audits/2026-08-09-takopi-feature-port-audit.md` only after implementation/tests establish final dispositions. Retain citations to the authoritative plans and comparison, update both HEAD fields, split source behavior, deterministic verification, runtime evidence, and roadmap-only work, and record the stale installed-code repair without claiming a source fix.
+
+Before closing directive rows, distinguish parser/data-field presence from behavior: sticky/meta dispatch, plan/goal card composition, and Claude/OpenCode subagent injection remain partial until destination tests pass. Record `/skill` as intentionally one-shot, carried-but-not-injected data. Badges/context footers show only plan/goal, matching source; do not invent skill/subagent badges or sticky skill injection.
 
 ### 2. Implement authorization-scoped compact/handoff confirmation
 
@@ -129,6 +137,7 @@ Keep useful helper tests in `tests/test_takopi_ported_behaviors.py`, but add beh
 - `tests/test_telegram_files.py` plus the upload/loop integration fixture: exact non-image annotation `Execute the task specified in this file: `incoming/<name>`.` and exactly one attachment; image behavior unchanged.
 - Existing scheduler/queue tests: compact/handoff jobs share per-resume FIFO and do not regress exact cancel/claim/steer behavior.
 - ACP/OMP/Grok/Agy fixture suites: compact factories/events, forward-compatible schemas, capacity failures, and preserved full OMP IDs.
+- Existing health/runtime/registry tests: real installed `health` entry-point lookup; `/health` classification and generic dispatch before `resolve_message()`; one HTML reply with no runner invocation; deterministic RAM/process/trigger/cost/uptime rendering and per-source degradation; engine directive populating `ResolvedMessage.engine_override`; and clean-wheel loading of every command backend.
 
 Tests assert visible events, transport sends/edits, store values, spawned args/payloads, and attempt counts—never source text or mere attribute assignment.
 
@@ -147,6 +156,8 @@ Append exactly three bullets under `D:/Projects/untether/ROADMAP.md` **Future**,
 - **End-to-end model override guarantees** — requested carryover of substantially implemented Takopi Task 23. Document precedence and harness limitations; prove explicit per-run > topic > chat > engine/runner default behavior, persistent-scope isolation, and new/resumed/queued/batched/handoff propagation through `EngineRunOptions` and each native runner/ACP request without cross-scope bleed.
 
 These are roadmap-only; do not implement their broad feature scope during migration closure. Do not add Task 24: its evaluation and chosen Takopi→Untether execution are represented by this plan and audit. Do not add E12/E13 roadmap bullets: hard `ty` and cross-platform static checks are mandatory execution gates, not future product work.
+
+Add **Installed command-backend and `/health` reliability** to the same Future migration-gap set as the other newly confirmed logging, voice, and presentation work. This item tracks artifact completeness and restart-safe live delivery; do not misclassify the already-present `HealthCommand` renderer as wholly missing.
 
 ### 12. Align docs, changelog, and live config/state
 
@@ -172,6 +183,7 @@ Run from `D:/Projects/untether` with UTF-8 enabled. Stop at the first failing ma
 6. **Runtime/native probes:** where installed/configured, run native OMP/Grok/Agy/ACP compact/handoff and model-override probes using environment-gated tests registered as `live_omp`, `live_grok`, `live_agy`, and `live_acp` markers (or the repository's documented equivalent if established first). Missing CLI/credentials classify only that probe `runtime-unverified`; deterministic tests may not be waived.
 7. **Authorized Telegram smoke:** with exactly one Untether poller, verify one ordinary prompt/reply, `/health`, existing resume, topic routing, non-image file annotation, compact confirmation Cancel, compact confirmation Confirm, one-card lifecycle, successful route switch, and failed seed retaining old routing. Inspect logs for polling conflict, raw provider blobs, duplicate terminal messages, or credential leakage.
 8. **Restart ownership:** verify the Startup target, restart/logoff-logon through the actual launcher, and repeat the one-process and authorized reply/health checks. Do not report process IDs or sensitive config.
+9. **Health packaging/runtime:** in a clean wheel environment enumerate/load all `untether.command_backends` and assert `health` ID integrity. With one authorized Startup-owned poller, verify `/health` returns HTML, an engine-directive prompt resolves without `NameError`, a second `/health` succeeds, and the process remains alive. Missing Telegram access marks only this smoke `runtime-unverified`.
 
 ## Rollback and failure rules
 
@@ -184,3 +196,5 @@ Run from `D:/Projects/untether` with UTF-8 enabled. Stop at the first failing ma
 ## Completion criteria
 
 Complete only when every source gap above has an observable test, all mandatory deterministic gates pass, the audit ledger matches current evidence, the three user-selected **Future** roadmap bullets exist exactly once with no Task 24 or E12/E13 duplicate, the obsolete live logging table is gone without secret disclosure, state authority is resolved without overwriting newer Untether writes, and runtime checks are either passed or narrowly recorded as `runtime-unverified` with the unavailable external prerequisite. No dead confirmation state, positional directive propagation, missing sticky/meta consumer, duplicate lifecycle message, raw transient provider error, premature route write, discarded `RunOutcome`, unwired runner/ACP setting, or false subagent-injection/badge claim remains.
+
+Health completion additionally requires the resolver regression, installed entry-point and loop-dispatch/no-runner tests, deterministic graceful snapshot tests, wheel command-backend sweep, roadmap/audit/docs/changelog updates, and the authorized single-poller smoke (or a narrow `runtime-unverified` classification for that external step).
